@@ -27,5 +27,7 @@ fn main() -> std::io::Result<()>
 
     println!("Entities: {}", world.entities);
 
+    println!("World summary:\n{}", world);
+
     Ok(())
 }

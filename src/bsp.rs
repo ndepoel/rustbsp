@@ -3,6 +3,8 @@ use std::io::prelude::*;
 use std::io::SeekFrom;
 use std::io::{Error, ErrorKind};
 use std::mem::{size_of, transmute};
+use std::fmt;
+use std::cmp;
 
 use super::math;
 
@@ -213,6 +215,52 @@ pub struct World
     pub shaders: Vec<Shader>,
     pub light_volumes: Vec<LightVolume>,
     // TODO: bezier faces
+}
+
+impl World
+{
+    pub fn tree_depth(&self) -> u32
+    {
+        self.tree_depth_impl(0, 0)
+    }
+
+    fn tree_depth_impl(&self, node_index: i32, depth: u32) -> u32
+    {
+        if node_index < 0
+        {
+            return depth;
+        }
+
+        let node = &self.nodes[node_index as usize];
+        let front = self.tree_depth_impl(node.front, depth + 1);
+        let back = self.tree_depth_impl(node.back, depth + 1);
+        cmp::max(front, back)
+    }
+}
+
+impl fmt::Display for World
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result
+    {
+        writeln!(f, "{} vertices", self.vertices.len())?;
+        writeln!(f, "{} faces", self.faces.len())?;
+        writeln!(f, "{} textures", self.textures.len())?;
+        writeln!(f, "{} lightmaps", self.lightmaps.len())?;
+        writeln!(f, "{} nodes", self.nodes.len())?;
+        writeln!(f, "{} leafs", self.leafs.len())?;
+        writeln!(f, "{} leaf faces", self.leaf_faces.len())?;
+        writeln!(f, "{} planes", self.planes.len())?;
+        writeln!(f, "{} entity chars", self.entities.len())?;
+        writeln!(f, "{} brushes", self.brushes.len())?;
+        writeln!(f, "{} leaf brushes", self.leaf_brushes.len())?;
+        writeln!(f, "{} brush sides", self.brush_sides.len())?;
+        writeln!(f, "{} models", self.models.len())?;
+        writeln!(f, "{} mesh vertices", self.mesh_verts.len())?;
+        writeln!(f, "{} shaders", self.shaders.len())?;
+        writeln!(f, "{} light volumes", self.light_volumes.len())?;
+        
+        write!(f, "BSP tree depth: {}", self.tree_depth())
+    }
 }
 
 // size_of<> cannot be used with generic type arguments, so instead of using generic functions we have to resort to macros here.
