@@ -1,4 +1,5 @@
 use std::ops;
+use std::fmt;
 
 #[derive(Debug, Default)]
 #[repr(C)]
@@ -28,7 +29,7 @@ pub struct Vector3
 // Just some basic 3D math routines for Vector3. Pretty self-explanatory.
 impl Vector3
 {
-    pub fn new() -> Vector3 { Vector3 { x: 0.0, y: 0.0, z: 0.0 } }
+    pub fn new(x: f32, y: f32, z: f32) -> Vector3 { Vector3 { x: x, y: y, z: z } }
 
     pub fn copy(src: &Vector3) -> Vector3 { Vector3 { x: src.x, y: src.y, z: src.z } }
 
@@ -88,6 +89,14 @@ impl Vector3
         let dy = other.y - self.y;
         let dz = other.z - self.z;
         (dx * dx + dy * dy + dz * dz).sqrt()
+    }
+}
+
+impl fmt::Display for Vector3
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result
+    {
+        write!(f, "({}, {}, {})", self.x, self.y, self.z)
     }
 }
 

@@ -135,6 +135,14 @@ pub struct Plane
     distance: f32,
 }
 
+impl Plane
+{
+    pub fn point_distance(&self, point: &math::Vector3) -> f32
+    {
+        self.normal.dot(point) - self.distance
+    }
+}
+
 // TODO: VisData
 
 #[derive(Debug)]
@@ -235,6 +243,68 @@ impl World
         let front = self.tree_depth_impl(node.front, depth + 1);
         let back = self.tree_depth_impl(node.back, depth + 1);
         cmp::max(front, back)
+    }
+
+    pub fn leaf_at_position(&self, pos: &math::Vector3) -> usize
+    {
+        let mut index = 0;
+        while index >= 0    // Positive index means we're still looking at a tree node, not a leaf
+        {
+            let node = &self.nodes[index as usize];
+            let plane = &self.planes[node.plane as usize];
+
+            if plane.point_distance(pos) >= 0.0
+            {
+                index = node.front;
+            }
+            else
+            {
+                index = node.back;
+            }
+        }
+
+        // Leaf indexes are stored as negative two's complement values, so convert them here
+        !index as usize
+    }
+
+    pub fn traverse_front_to_back(&self, position: &math::Vector3, visit_node: fn(usize, &Node) -> bool, visit_leaf: fn(usize, &Leaf))
+    {
+        self.traverse_front_to_back_impl(0, position, visit_node, visit_leaf);
+    }
+
+    fn traverse_front_to_back_impl(&self, node_index: i32, position: &math::Vector3, visit_node: fn(usize, &Node) -> bool, visit_leaf: fn(usize, &Leaf))
+    {
+        if node_index < 0
+        {
+            let leaf_index = !node_index as usize;
+            visit_leaf(leaf_index, &self.leafs[leaf_index]);
+            return;
+        }
+
+        let node = &self.nodes[node_index as usize];
+        if !visit_node(node_index as usize, node)
+        {
+            // Allow traversal of this side of the tree to be aborted, e.g. if the node's bounds fall outside of view
+            return;
+        }
+
+        let first: i32;
+        let last: i32;
+        let plane = &self.planes[node.plane as usize];
+
+        if plane.point_distance(position) >= 0.0
+        {
+            first = node.front;
+            last = node.back;
+        }
+        else
+        {
+            first = node.back;
+            last = node.front;
+        }
+
+        self.traverse_front_to_back_impl(first, position, visit_node, visit_leaf);
+        self.traverse_front_to_back_impl(last, position, visit_node, visit_leaf);
     }
 }
 
