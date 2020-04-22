@@ -269,10 +269,17 @@ impl World
 
     pub fn traverse_front_to_back(&self, position: &math::Vector3, visit_node: fn(usize, &Node) -> bool, visit_leaf: fn(usize, &Leaf))
     {
-        self.traverse_front_to_back_impl(0, position, visit_node, visit_leaf);
+        let front_to_back = |plane: &Plane| plane.point_distance(position) >= 0.0;
+        self.traverse_impl(0, &front_to_back, visit_node, visit_leaf);
     }
 
-    fn traverse_front_to_back_impl(&self, node_index: i32, position: &math::Vector3, visit_node: fn(usize, &Node) -> bool, visit_leaf: fn(usize, &Leaf))
+    pub fn traverse_back_to_front(&self, position: &math::Vector3, visit_node: fn(usize, &Node) -> bool, visit_leaf: fn(usize, &Leaf))
+    {
+        let back_to_front = |plane: &Plane| plane.point_distance(position) < 0.0;
+        self.traverse_impl(0, &back_to_front, visit_node, visit_leaf);
+    }
+
+    fn traverse_impl(&self, node_index: i32, front_first: &dyn Fn(&Plane) -> bool, visit_node: fn(usize, &Node) -> bool, visit_leaf: fn(usize, &Leaf))
     {
         if node_index < 0
         {
@@ -292,7 +299,7 @@ impl World
         let last: i32;
         let plane = &self.planes[node.plane as usize];
 
-        if plane.point_distance(position) >= 0.0
+        if front_first(plane)
         {
             first = node.front;
             last = node.back;
@@ -303,8 +310,8 @@ impl World
             last = node.front;
         }
 
-        self.traverse_front_to_back_impl(first, position, visit_node, visit_leaf);
-        self.traverse_front_to_back_impl(last, position, visit_node, visit_leaf);
+        self.traverse_impl(first, front_first, visit_node, visit_leaf);
+        self.traverse_impl(last, front_first, visit_node, visit_leaf);
     }
 }
 
