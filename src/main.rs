@@ -1,8 +1,10 @@
 #![allow(dead_code)]
+#![allow(unused_imports)]
 
 use std::fs::File;
 use std::env;
 use std::io::{Result, Error, ErrorKind};
+use std::io::prelude::*;
 
 mod bsp;
 mod math;
@@ -27,10 +29,18 @@ fn main() -> Result<()>
         println!("Texture '{}' type {}", tex.name(), tex.texture_type);
     }
 
-    // TODO: dump lightmaps to raw image files
+    // Dump lightmaps to raw image files
     // for i in 0..world.lightmaps.len()
     // {
+    //     let mut lm_file = File::create(format!("lightmap-{}.raw", i))?;
     //     let lm = &world.lightmaps[i];
+    //     for row in lm.image.iter()
+    //     {
+    //         for col in row.iter()
+    //         {
+    //             lm_file.write(&col[..])?;
+    //         }
+    //     }
     // }
 
     println!("Entities: {}", world.entities);

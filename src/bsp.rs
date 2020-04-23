@@ -99,7 +99,7 @@ impl Texture
 #[repr(C)]
 pub struct Lightmap
 {
-    image: [[[u8; 3]; 128]; 128],   // 3-dimensional array, I wonder how well this will work in practice...
+    pub image: [[[u8; 3]; 128]; 128],   // 3-dimensional array, I wonder how well this will work in practice...
 }
 
 #[derive(Debug)]
