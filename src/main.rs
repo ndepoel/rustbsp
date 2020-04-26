@@ -8,6 +8,7 @@ use std::io::prelude::*;
 
 mod bsp;
 mod math;
+mod entity;
 
 fn main() -> Result<()>
 {
@@ -54,6 +55,9 @@ fn main() -> Result<()>
     // Traverse the BSP tree and print visited leafs using a lambda expression
     world.traverse_front_to_back(&v, |_index, _node| true, |index, _leaf| print!("{} ", index));
     println!("");
+
+    let entities = entity::parse_entities(&world.entities);
+    println!("{:?}", entities);
 
     Ok(())
 }
