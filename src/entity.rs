@@ -87,6 +87,42 @@ fn parse_vector(string: &String) -> math::Vector3
     }
 }
 
+fn parse_entity(chars: &mut Chars<'_>) -> Option<Entity>
+{
+    loop
+    {
+        match next_token(chars)
+        {
+            Some(token) if token == "{" => break,
+            Some(_) => continue,
+            None => return None,
+        }
+    }
+
+    let mut entity = Entity::default();
+    loop
+    {
+        match next_token(chars)
+        {
+            Some(token) if token == "}" => break,
+            Some(key) => { entity.properties.insert(key, next_token(chars).unwrap_or_default()); },
+            None => break,
+        }
+    }
+
+    if let Some(class_name) = entity.properties.remove("classname")
+    {
+        entity.class_name = class_name.clone();
+    }
+
+    if let Some(origin) = entity.properties.remove("origin")
+    {
+        entity.origin = parse_vector(&origin);
+    }
+
+    Some(entity)
+}
+
 pub fn parse_entities(string: &String) -> Vec<Entity>
 {
     let mut entities = Vec::new();
@@ -94,37 +130,33 @@ pub fn parse_entities(string: &String) -> Vec<Entity>
 
     loop
     {
-        loop
+        match parse_entity(&mut chars)
         {
-            match next_token(&mut chars)
-            {
-                Some(token) if token == "{" => break,
-                Some(_) => continue,
-                None => return entities,
-            }
+            Some(entity) => entities.push(entity),
+            None => return entities,
         }
+    }
+}
 
-        let mut entity = Entity::default();
-        loop
-        {
-            match next_token(&mut chars)
-            {
-                Some(token) if token == "}" => break,
-                Some(key) => { entity.properties.insert(key, next_token(&mut chars).unwrap_or_default()); },
-                None => break,
-            }
-        }
+#[cfg(test)]
+mod tests
+{
+    use super::*;
 
-        if let Some(class_name) = entity.properties.remove("classname")
-        {
-            entity.class_name = class_name.clone();
-        }
+    #[test]
+    pub fn test_tokenize()
+    {
+        let string = "This is \"a test\"   {  \tHello!   \0 \t\r\n   \"I am a longer quoted string\"   \"42 13.0 69\"     }\r\n\0".to_string();
+        let mut chars = string.chars();
 
-        if let Some(origin) = entity.properties.remove("origin")
-        {
-            entity.origin = parse_vector(&origin);
-        }
-
-        entities.push(entity);
+        assert_eq!(Some("This".to_string()), next_token(&mut chars));
+        assert_eq!(Some("is".to_string()), next_token(&mut chars));
+        assert_eq!(Some("a test".to_string()), next_token(&mut chars));
+        assert_eq!(Some("{".to_string()), next_token(&mut chars));
+        assert_eq!(Some("Hello!".to_string()), next_token(&mut chars));
+        assert_eq!(Some("I am a longer quoted string".to_string()), next_token(&mut chars));
+        assert_eq!(Some("42 13.0 69".to_string()), next_token(&mut chars));
+        assert_eq!(Some("}".to_string()), next_token(&mut chars));
+        assert_eq!(None, next_token(&mut chars));
     }
 }
