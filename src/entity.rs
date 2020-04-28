@@ -63,7 +63,7 @@ fn next_token(chars: &mut Chars<'_>) -> Option<String>
     if token.len() > 0 { Some(token) } else { None }
 }
 
-pub fn tokenize(string: &String) -> Vec<String>
+pub fn tokenize(string: &str) -> Vec<String>
 {
     let mut tokens = Vec::new();
 
@@ -76,7 +76,7 @@ pub fn tokenize(string: &String) -> Vec<String>
     tokens
 }
 
-fn parse_vector(string: &String) -> math::Vector3
+fn parse_vector(string: &str) -> math::Vector3
 {
     let mut chars = string.chars();
     math::Vector3
@@ -123,7 +123,7 @@ fn parse_entity(chars: &mut Chars<'_>) -> Option<Entity>
     Some(entity)
 }
 
-pub fn parse_entities(string: &String) -> Vec<Entity>
+pub fn parse_entities(string: &str) -> Vec<Entity>
 {
     let mut entities = Vec::new();
     let mut chars = string.chars();
@@ -165,25 +165,25 @@ mod tests
     fn test_vector()
     {
         // Test a mix of integer and floating point string values
-        let vec = parse_vector(&"1 2.0 3.14".to_string());
+        let vec = parse_vector("1 2.0 3.14");
         assert_eq!(1.0, vec.x);
         assert_eq!(2.0, vec.y);
         assert_eq!(3.14, vec.z);
 
         // Missing tokens should result in a default component value
-        let vec = parse_vector(&"4 5".to_string());
+        let vec = parse_vector("4 5");
         assert_eq!(4.0, vec.x);
         assert_eq!(5.0, vec.y);
         assert_eq!(0.0, vec.z);
 
         // Empty strings should be accepted, result in a default vector
-        let vec = parse_vector(&"".to_string());
+        let vec = parse_vector("");
         assert_eq!(0.0, vec.x);
         assert_eq!(0.0, vec.y);
         assert_eq!(0.0, vec.z);
 
         // Test parse errors, invalid numbers should result in default values
-        let vec = parse_vector(&"a b c".to_string());
+        let vec = parse_vector("a b c");
         assert_eq!(0.0, vec.x);
         assert_eq!(0.0, vec.y);
         assert_eq!(0.0, vec.z);
