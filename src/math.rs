@@ -1,7 +1,7 @@
 use std::ops;
 use std::fmt;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
 #[repr(C)]
 pub struct Vector2
 {
@@ -9,7 +9,7 @@ pub struct Vector2
     pub y: f32,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
 pub struct Vector2i
 {
@@ -17,7 +17,7 @@ pub struct Vector2i
     pub y: i32,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, Copy, PartialEq)]   // Can only implement PartialEq because f32 does not implement full equivalance (e.g NaN != NaN)
 #[repr(C)]
 pub struct Vector3
 {
@@ -30,8 +30,6 @@ pub struct Vector3
 impl Vector3
 {
     pub fn new(x: f32, y: f32, z: f32) -> Vector3 { Vector3 { x: x, y: y, z: z } }
-
-    pub fn copy(src: &Vector3) -> Vector3 { Vector3 { x: src.x, y: src.y, z: src.z } }
 
     pub fn set(&mut self, x: f32, y: f32, z: f32) { self.x = x; self.y = y; self.z = z; }
 
@@ -121,6 +119,16 @@ impl ops::Sub for Vector3
     }
 }
 
+impl ops::Mul for Vector3
+{
+    type Output = Vector3;
+
+    fn mul(self, other: Vector3) -> Vector3
+    {
+        Vector3 { x: self.x * other.x, y: self.y * other.y, z: self.z * other.z }
+    }
+}
+
 impl ops::Mul<f32> for Vector3
 {
     type Output = Vector3;
@@ -128,6 +136,16 @@ impl ops::Mul<f32> for Vector3
     fn mul(self, scale: f32) -> Vector3
     {
         Vector3 { x: self.x * scale, y: self.y * scale, z: self.z * scale }
+    }
+}
+
+impl ops::Div<f32> for Vector3
+{
+    type Output = Vector3;
+
+    fn div(self, denom: f32) -> Vector3
+    {
+        Vector3 { x: self.x / denom, y: self.y / denom, z: self.z / denom }
     }
 }
 
@@ -141,7 +159,7 @@ impl ops::Neg for Vector3
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
 pub struct Vector3i
 {
@@ -150,7 +168,7 @@ pub struct Vector3i
     pub z: i32,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
 pub struct Color3
 {
@@ -159,7 +177,7 @@ pub struct Color3
     pub b: u8,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
 pub struct Color4
 {

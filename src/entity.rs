@@ -204,7 +204,7 @@ mod tests
 
         let entity = &ent.unwrap();
         assert_eq!("foobar", &entity.class_name);
-        assert!(entity.origin.length() > 4.0);
+        assert_eq!(math::Vector3::new(1.1, 2.2, 3.3), entity.origin);
         assert!(entity.properties.contains_key("bar"));
         assert_eq!("baz", entity.properties.get("bar").unwrap());
     }
@@ -221,6 +221,6 @@ mod tests
         assert!(ent.is_some());
         let entity = &ent.unwrap();
         assert_eq!("xyz", &entity.class_name);
-        assert_eq!(0.0, entity.origin.length());
+        assert_eq!(math::Vector3::default(), entity.origin);
     }
 }
