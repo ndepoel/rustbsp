@@ -177,6 +177,21 @@ pub struct Color3
     pub b: u8,
 }
 
+impl Color3
+{
+    const FMAX: f32 = u8::MAX as f32;
+
+    pub fn from_vector3(v: &Vector3) -> Color3
+    {
+        Color3 { r: (v.x * Color3::FMAX) as u8, g: (v.y * Color3::FMAX) as u8, b: (v.z * Color3::FMAX) as u8 }
+    }
+
+    pub fn to_vector3(&self) -> Vector3
+    {
+        Vector3 { x: self.r as f32 / Color3::FMAX, y: self.g as f32 / Color3::FMAX, z: self.b as f32 / Color3::FMAX }
+    }
+}
+
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
 pub struct Color4
@@ -185,4 +200,19 @@ pub struct Color4
     pub g: u8,
     pub b: u8,
     pub a: u8,
+}
+
+impl Color4
+{
+    const FMAX: f32 = u8::MAX as f32;
+
+    pub fn from_vector3(v: &Vector3) -> Color4
+    {
+        Color4 { r: (v.x * Color4::FMAX) as u8, g: (v.y * Color4::FMAX) as u8, b: (v.z * Color4::FMAX) as u8, a: u8::MAX }
+    }
+
+    pub fn to_vector3(&self) -> Vector3
+    {
+        Vector3 { x: self.r as f32 / Color4::FMAX, y: self.g as f32 / Color4::FMAX, z: self.b as f32 / Color4::FMAX }
+    }
 }
