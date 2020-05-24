@@ -6,6 +6,8 @@ use std::env;
 use std::io::{Result, Error, ErrorKind};
 use std::io::prelude::*;
 
+use image::{ImageBuffer, Rgb};
+
 mod bsp;
 mod math;
 mod entity;
@@ -31,18 +33,12 @@ fn main() -> Result<()>
     }
 
     // Dump lightmaps to raw image files
-    // for i in 0..world.lightmaps.len()
-    // {
-    //     let mut lm_file = File::create(format!("lightmap-{}.raw", i))?;
-    //     let lm = &world.lightmaps[i];
-    //     for row in lm.image.iter()
-    //     {
-    //         for col in row.iter()
-    //         {
-    //             lm_file.write(&col[..])?;
-    //         }
-    //     }
-    // }
+    for i in 0..world.lightmaps.len()
+    {
+        let lm = &world.lightmaps[i];
+        let img = ImageBuffer::from_fn(128, 128, |x,y| { Rgb(lm.image[x as usize][y as usize]) });
+        img.save(format!("lightmap-{}.png", i)).unwrap();
+    }
 
     println!("Entities: {}", world.entities);
 
