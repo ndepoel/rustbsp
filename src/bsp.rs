@@ -92,7 +92,7 @@ impl Texture
     pub fn name(&self) -> &str
     {
         // Note: this doesn't properly handle UTF8 errors, but since BSP files only contain plain ASCII strings... ¯\_(ツ)_/¯
-        std::str::from_utf8(&self.name).unwrap().trim_matches('\0')
+        std::str::from_utf8(&self.name).unwrap().trim_end_matches(char::is_control)
     }
 }
 
@@ -187,7 +187,7 @@ impl Shader
     pub fn name(&self) -> &str
     {
         // Note: this doesn't properly handle UTF8 errors, but since BSP files only contain plain ASCII strings... ¯\_(ツ)_/¯
-        std::str::from_utf8(&self.name).unwrap().trim_matches('\0')
+        std::str::from_utf8(&self.name).unwrap().trim_end_matches(char::is_control)
     }
 }
 
