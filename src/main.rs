@@ -1,6 +1,9 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
 
+#[macro_use]
+extern crate bitflags;
+
 use std::fs::File;
 use std::env;
 use std::io::{Result, Error, ErrorKind};
@@ -29,7 +32,7 @@ fn main() -> Result<()>
 
     for tex in &world.textures
     {
-        println!("Texture '{}' content flags {}", tex.name(), tex.content_flags);
+        println!("Texture '{}' content flags {:?}", tex.name(), tex.content_flags);
     }
 
     // Dump lightmaps to raw image files
@@ -40,7 +43,7 @@ fn main() -> Result<()>
         img.save(format!("lightmap-{}.png", i)).unwrap();
     }
 
-    println!("Entities: {}", world.entities);
+    // println!("Entities: {}", world.entities);
 
     println!("World summary:\n{}", world);
 

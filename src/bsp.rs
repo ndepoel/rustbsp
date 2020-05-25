@@ -90,12 +90,70 @@ pub struct Surface
     patch_size: math::Vector2i,
 }
 
+bitflags!
+{
+    pub struct SurfaceFlags: u32
+    {
+        const NODAMAGE      = 0x00000001;
+        const SLICK         = 0x00000002;
+        const SKY           = 0x00000004;
+        const LADDER        = 0x00000008;
+        const NOIMPACT      = 0x00000010;
+        const NOMARKS       = 0x00000020;
+        const FLESH         = 0x00000040;
+        const NODRAW        = 0x00000080;
+        const HINT          = 0x00000100;
+        const SKIP          = 0x00000200;
+        const NOLIGHTMAP    = 0x00000400;
+        const POINTLIGHT    = 0x00000800;
+        const METALSTEPS    = 0x00001000;
+        const NOSTEPS       = 0x00002000;
+        const NONSOLID      = 0x00004000;
+        const LIGHTFILTER   = 0x00008000;
+        const ALPHASHADOW   = 0x00010000;
+        const NODLIGHT      = 0x00020000;
+        const DUST          = 0x00040000;
+    }
+}
+
+bitflags!
+{
+    pub struct ContentFlags: u32
+    {
+        const SOLID         = 0x00000001;
+        const LAVA          = 0x00000008;
+        const SLIME         = 0x00000010;
+        const WATER         = 0x00000020;
+        const FOG           = 0x00000040;
+        const NOTTEAM1      = 0x00000080;
+        const NOTTEAM2      = 0x00000100;
+        const NOBOTCLIP     = 0x00000200;
+        const AREAPORTAL    = 0x00008000;
+        const PLAYERCLIP    = 0x00010000;
+        const MONSTERCLIP   = 0x00020000;
+        const TELEPORTER    = 0x00040000;
+        const JUMPPAD       = 0x00080000;
+        const CLUSTERPORTAL = 0x00100000;
+        const DONOTENTER    = 0x00200000;
+        const BOTCLIP       = 0x00400000;
+        const MOVER         = 0x00800000;
+        const ORIGIN        = 0x01000000;
+        const BODY          = 0x02000000;
+        const CORPSE        = 0x04000000;
+        const DETAIL        = 0x08000000;
+        const STRUCTURAL    = 0x10000000;
+        const TRANSLUCENT   = 0x20000000;
+        const TRIGGER       = 0x40000000;
+        const NODROP        = 0x80000000;
+    }
+}
+
 #[repr(C)]
 pub struct Texture
 {
     name: [u8; 64], // Arrays are always fixed-size and have to be known at compile-time. Also #[derive(Debug)] only supports arrays up to 32 in length.
-    pub surface_flags: i32,
-    pub content_flags: i32,
+    pub surface_flags: SurfaceFlags,
+    pub content_flags: ContentFlags,
 }
 
 impl Texture
