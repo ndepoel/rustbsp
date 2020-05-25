@@ -25,18 +25,18 @@ fn main() -> Result<()>
     let world = bsp::load_world(&mut file)?;
 
     //println!("{:?}", world.vertices);
-    //println!("{:?}", world.faces);
+    //println!("{:?}", world.surfaces);
 
     for tex in &world.textures
     {
-        println!("Texture '{}' type {}", tex.name(), tex.texture_type);
+        println!("Texture '{}' content flags {}", tex.name(), tex.content_flags);
     }
 
     // Dump lightmaps to raw image files
     for i in 0..world.lightmaps.len()
     {
         let lm = &world.lightmaps[i];
-        let img = ImageBuffer::from_fn(128, 128, |x,y| { Rgb(lm.image[x as usize][y as usize]) });
+        let img = ImageBuffer::from_fn(bsp::LIGHTMAP_WIDTH as u32, bsp::LIGHTMAP_HEIGHT as u32, |x,y| { Rgb(lm.image[x as usize][y as usize]) });
         img.save(format!("lightmap-{}.png", i)).unwrap();
     }
 

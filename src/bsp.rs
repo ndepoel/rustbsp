@@ -16,18 +16,18 @@ enum LumpType
     Planes,
     Nodes,
     Leafs,
-    LeafFaces,
+    LeafSurfaces,
     LeafBrushes,
     Models,
     Brushes,
     BrushSides,
     Vertices,
-    MeshVerts,
-    Shaders,
-    Faces,
+    Indices,
+    Fogs,
+    Surfaces,
     Lightmaps,
     LightVolumes,
-    VisData,
+    Visibility,
 
     MaxLumps
 }
@@ -60,31 +60,42 @@ pub struct Vertex
 }
 
 #[derive(Debug)]
+#[repr(i32)]
+pub enum SurfaceType
+{
+    Bad = 0,
+    Planar = 1,
+    Patch = 2,
+    Mesh = 3,
+    Flare = 4,
+}
+
+#[derive(Debug)]
 #[repr(C)]
-pub struct Face
+pub struct Surface
 {
     texture_id: i32,
-    effect: i32,
-    face_type: i32,
-    vert_index: i32,
+    fog_id: i32,
+    surface_type: SurfaceType,
+    first_vertex: i32,
     num_vertices: i32,
-    mesh_vert_index: i32,
-    num_mesh_verts: i32,
+    first_index: i32,
+    num_indices: i32,
     lightmap_id: i32,
-    map_corner: math::Vector2i,
-    map_size: math::Vector2i,
-    map_pos: math::Vector3,
-    map_vecs: [math::Vector3; 2],
+    lightmap_corner: math::Vector2i,
+    lightmap_size: math::Vector2i,
+    lightmap_pos: math::Vector3,
+    lightmap_vecs: [math::Vector3; 2],  // for patches, [0] and [1] are lodbounds
     normal: math::Vector3,
-    size: math::Vector2i,
+    patch_size: math::Vector2i,
 }
 
 #[repr(C)]
 pub struct Texture
 {
     name: [u8; 64], // Arrays are always fixed-size and have to be known at compile-time. Also #[derive(Debug)] only supports arrays up to 32 in length.
-    flags: i32,
-    pub texture_type: i32,
+    pub surface_flags: i32,
+    pub content_flags: i32,
 }
 
 impl Texture
@@ -96,10 +107,13 @@ impl Texture
     }
 }
 
+pub const LIGHTMAP_WIDTH: usize = 128;
+pub const LIGHTMAP_HEIGHT: usize = 128;
+
 #[repr(C)]
 pub struct Lightmap
 {
-    pub image: [[[u8; 3]; 128]; 128],   // 3-dimensional array, I wonder how well this will work in practice...
+    pub image: [[[u8; 3]; LIGHTMAP_HEIGHT]; LIGHTMAP_WIDTH],   // 3-dimensional array, I wonder how well this will work in practice...
 }
 
 #[derive(Debug)]
@@ -121,9 +135,9 @@ pub struct Leaf
     area: i32,
     mins: math::Vector3i,
     maxs: math::Vector3i,
-    face_index: i32,
-    num_faces: i32,
-    brush_index: i32,
+    first_surface: i32,
+    num_surfaces: i32,
+    first_brush: i32,
     num_brushes: i32,
 }
 
@@ -149,8 +163,8 @@ impl Plane
 #[repr(C)]
 pub struct Brush
 {
-    brush_side_index: i32,
-    num_brush_sides: i32,
+    first_side: i32,
+    num_sides: i32,
     texture_id: i32,
 }
 
@@ -168,26 +182,26 @@ pub struct Model
 {
     mins: math::Vector3,
     maxs: math::Vector3,
-    face_index: i32,
-    num_faces: i32,
-    brush_index: i32,
+    first_surface: i32,
+    num_surfaces: i32,
+    first_brush: i32,
     num_brushes: i32,
 }
 
 #[repr(C)]
-pub struct Shader
+pub struct Fog
 {
-    name: [u8; 64],
+    shader: [u8; 64],
     brush_index: i32,
-    unknown: i32,
+    visible_side: i32,
 }
 
-impl Shader
+impl Fog
 {
-    pub fn name(&self) -> &str
+    pub fn shader_name(&self) -> &str
     {
         // Note: this doesn't properly handle UTF8 errors, but since BSP files only contain plain ASCII strings... ¯\_(ツ)_/¯
-        std::str::from_utf8(&self.name).unwrap().trim_end_matches(char::is_control)
+        std::str::from_utf8(&self.shader).unwrap().trim_end_matches(char::is_control)
     }
 }
 
@@ -206,12 +220,12 @@ pub struct LightVolume
 pub struct World
 {
     pub vertices: Vec<Vertex>,
-    pub faces: Vec<Face>,
+    pub surfaces: Vec<Surface>,
     pub textures: Vec<Texture>,
     pub lightmaps: Vec<Lightmap>,
     pub nodes: Vec<Node>,
     pub leafs: Vec<Leaf>,
-    pub leaf_faces: Vec<i32>,
+    pub leaf_surfaces: Vec<i32>,
     pub planes: Vec<Plane>,
     // TODO: visdata
     pub entities: String,
@@ -219,8 +233,8 @@ pub struct World
     pub leaf_brushes: Vec<i32>,
     pub brush_sides: Vec<BrushSide>,
     pub models: Vec<Model>,
-    pub mesh_verts: Vec<i32>,
-    pub shaders: Vec<Shader>,
+    pub indices: Vec<i32>,
+    pub fogs: Vec<Fog>,
     pub light_volumes: Vec<LightVolume>,
     // TODO: bezier faces
 }
@@ -320,20 +334,20 @@ impl fmt::Display for World
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result
     {
         writeln!(f, "{} vertices", self.vertices.len())?;
-        writeln!(f, "{} faces", self.faces.len())?;
+        writeln!(f, "{} surfaces", self.surfaces.len())?;
         writeln!(f, "{} textures", self.textures.len())?;
         writeln!(f, "{} lightmaps", self.lightmaps.len())?;
         writeln!(f, "{} nodes", self.nodes.len())?;
         writeln!(f, "{} leafs", self.leafs.len())?;
-        writeln!(f, "{} leaf faces", self.leaf_faces.len())?;
+        writeln!(f, "{} leaf surfaces", self.leaf_surfaces.len())?;
         writeln!(f, "{} planes", self.planes.len())?;
         writeln!(f, "{} entity chars", self.entities.len())?;
         writeln!(f, "{} brushes", self.brushes.len())?;
         writeln!(f, "{} leaf brushes", self.leaf_brushes.len())?;
         writeln!(f, "{} brush sides", self.brush_sides.len())?;
         writeln!(f, "{} models", self.models.len())?;
-        writeln!(f, "{} mesh vertices", self.mesh_verts.len())?;
-        writeln!(f, "{} shaders", self.shaders.len())?;
+        writeln!(f, "{} indices", self.indices.len())?;
+        writeln!(f, "{} fogs", self.fogs.len())?;
         writeln!(f, "{} light volumes", self.light_volumes.len())?;
         
         write!(f, "BSP tree depth: {}", self.tree_depth())
@@ -431,8 +445,8 @@ pub fn load_world(file: &mut File) -> std::io::Result<World>
     let lump = &lumps[LumpType::Vertices as usize];
     world.vertices = read_lump_vec!(file, lump, Vertex);
 
-    let lump = &lumps[LumpType::Faces as usize];
-    world.faces = read_lump_vec!(file, lump, Face);
+    let lump = &lumps[LumpType::Surfaces as usize];
+    world.surfaces = read_lump_vec!(file, lump, Surface);
 
     let lump = &lumps[LumpType::Textures as usize];
     world.textures = read_lump_vec!(file, lump, Texture);
@@ -446,8 +460,8 @@ pub fn load_world(file: &mut File) -> std::io::Result<World>
     let lump = &lumps[LumpType::Leafs as usize];
     world.leafs = read_lump_vec!(file, lump, Leaf);
 
-    let lump = &lumps[LumpType::LeafFaces as usize];
-    world.leaf_faces = read_lump_vec!(file, lump, i32);
+    let lump = &lumps[LumpType::LeafSurfaces as usize];
+    world.leaf_surfaces = read_lump_vec!(file, lump, i32);
 
     let lump = &lumps[LumpType::Planes as usize];
     world.planes = read_lump_vec!(file, lump, Plane);
@@ -467,11 +481,11 @@ pub fn load_world(file: &mut File) -> std::io::Result<World>
     let lump = &lumps[LumpType::Models as usize];
     world.models = read_lump_vec!(file, lump, Model);
 
-    let lump = &lumps[LumpType::MeshVerts as usize];
-    world.mesh_verts = read_lump_vec!(file, lump, i32);
+    let lump = &lumps[LumpType::Indices as usize];
+    world.indices = read_lump_vec!(file, lump, i32);
 
-    let lump = &lumps[LumpType::Shaders as usize];
-    world.shaders = read_lump_vec!(file, lump, Shader);
+    let lump = &lumps[LumpType::Fogs as usize];
+    world.fogs = read_lump_vec!(file, lump, Fog);
 
     let lump = &lumps[LumpType::LightVolumes as usize];
     world.light_volumes = read_lump_vec!(file, lump, LightVolume);
