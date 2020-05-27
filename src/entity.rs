@@ -1,14 +1,22 @@
 use std::str::Chars;
 use std::collections::HashMap;
 
-use super::math;
+use cgmath::{Vector3, Zero};
 
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct Entity
 {
     pub class_name: String,
-    pub origin: math::Vector3,
+    pub origin: Vector3<f32>,
     pub properties: HashMap<String, String>,
+}
+
+impl Entity
+{
+    pub fn default() -> Self
+    {
+        Self { class_name: String::default(), origin: Vector3::<f32>::zero(), properties: HashMap::<String, String>::default() }
+    }
 }
 
 fn next_token(chars: &mut Chars<'_>) -> Option<String>
@@ -76,15 +84,14 @@ pub fn tokenize(string: &str) -> Vec<String>
     tokens
 }
 
-fn parse_vector(string: &str) -> math::Vector3
+fn parse_vector(string: &str) -> Vector3<f32>
 {
     let mut chars = string.chars();
-    math::Vector3
-    {
-        x: next_token(&mut chars).unwrap_or_default().parse::<f32>().unwrap_or_default(),
-        y: next_token(&mut chars).unwrap_or_default().parse::<f32>().unwrap_or_default(),
-        z: next_token(&mut chars).unwrap_or_default().parse::<f32>().unwrap_or_default(),
-    }
+    Vector3::new(
+        next_token(&mut chars).unwrap_or_default().parse::<f32>().unwrap_or_default(),
+        next_token(&mut chars).unwrap_or_default().parse::<f32>().unwrap_or_default(),
+        next_token(&mut chars).unwrap_or_default().parse::<f32>().unwrap_or_default(),
+    )
 }
 
 fn parse_entity(chars: &mut Chars<'_>) -> Option<Entity>
@@ -204,7 +211,7 @@ mod tests
 
         let entity = &ent.unwrap();
         assert_eq!("foobar", &entity.class_name);
-        assert_eq!(math::Vector3::new(1.1, 2.2, 3.3), entity.origin);
+        assert_eq!(Vector3::new(1.1, 2.2, 3.3), entity.origin);
         assert!(entity.properties.contains_key("bar"));
         assert_eq!("baz", entity.properties.get("bar").unwrap());
     }
@@ -221,6 +228,6 @@ mod tests
         assert!(ent.is_some());
         let entity = &ent.unwrap();
         assert_eq!("xyz", &entity.class_name);
-        assert_eq!(math::Vector3::default(), entity.origin);
+        assert_eq!(Vector3::<f32>::zero(), entity.origin);
     }
 }

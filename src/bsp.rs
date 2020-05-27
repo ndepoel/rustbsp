@@ -6,7 +6,7 @@ use std::mem::{size_of, transmute};
 use std::fmt;
 use std::cmp;
 
-use super::math;
+use cgmath::{Vector2, Vector3};
 
 // Enums in Rust are integer-counted by default like most other languages, starting at 0
 enum LumpType
@@ -52,11 +52,12 @@ struct Lump
 #[repr(C)]
 pub struct Vertex
 {
-    position: math::Vector3,
-    texture_coord: math::Vector2,
-    lightmap_coord: math::Vector2,
-    normal: math::Vector3,
-    color: math::Color4,
+    // We're using plain arrays here instead of cgmath types, because this allows us to use this data structure directly to create Vulkan vertex buffers
+    position: [f32; 3],
+    texture_coord: [f32; 2],
+    lightmap_coord: [f32; 2],
+    normal: [f32; 3],
+    color: [u8; 4],
 }
 
 #[derive(Debug)]
@@ -82,12 +83,12 @@ pub struct Surface
     first_index: i32,
     num_indices: i32,
     lightmap_id: i32,
-    lightmap_corner: math::Vector2i,
-    lightmap_size: math::Vector2i,
-    lightmap_pos: math::Vector3,
-    lightmap_vecs: [math::Vector3; 2],  // for patches, [0] and [1] are lodbounds
-    normal: math::Vector3,
-    patch_size: math::Vector2i,
+    lightmap_corner: Vector2<i32>,
+    lightmap_size: Vector2<i32>,
+    lightmap_pos: Vector3<f32>,
+    lightmap_vecs: [Vector3<f32>; 2],  // for patches, [0] and [1] are lodbounds
+    normal: Vector3<f32>,
+    patch_size: Vector2<i32>,
 }
 
 bitflags!
@@ -181,8 +182,8 @@ pub struct Node
     plane: i32,
     front: i32,
     back: i32,
-    mins: math::Vector3i,
-    maxs: math::Vector3i,
+    mins: Vector3<i32>,
+    maxs: Vector3<i32>,
 }
 
 #[derive(Debug)]
@@ -191,8 +192,8 @@ pub struct Leaf
 {
     cluster: i32,
     area: i32,
-    mins: math::Vector3i,
-    maxs: math::Vector3i,
+    mins: Vector3<i32>,
+    maxs: Vector3<i32>,
     first_surface: i32,
     num_surfaces: i32,
     first_brush: i32,
@@ -203,15 +204,15 @@ pub struct Leaf
 #[repr(C)]
 pub struct Plane
 {
-    normal: math::Vector3,
+    normal: Vector3<f32>,
     distance: f32,
 }
 
 impl Plane
 {
-    pub fn point_distance(&self, point: &math::Vector3) -> f32
+    pub fn point_distance(&self, point: Vector3<f32>) -> f32
     {
-        self.normal.dot(point) - self.distance
+        cgmath::dot(self.normal, point) - self.distance
     }
 }
 
@@ -238,8 +239,8 @@ pub struct BrushSide
 #[repr(C)]
 pub struct Model
 {
-    mins: math::Vector3,
-    maxs: math::Vector3,
+    mins: Vector3<f32>,
+    maxs: Vector3<f32>,
     first_surface: i32,
     num_surfaces: i32,
     first_brush: i32,
@@ -267,8 +268,8 @@ impl Fog
 #[repr(C)]
 pub struct LightVolume
 {
-    ambient: math::Color3,
-    directional: math::Color3,
+    ambient: [u8; 3],
+    directional: [u8; 3],
     direction: [u8; 2],
 }
 
@@ -317,7 +318,7 @@ impl World
         cmp::max(front, back)
     }
 
-    pub fn leaf_at_position(&self, pos: &math::Vector3) -> usize
+    pub fn leaf_at_position(&self, pos: Vector3<f32>) -> usize
     {
         let mut index = 0;
         while index >= 0    // Positive index means we're still looking at a tree node, not a leaf
@@ -339,13 +340,13 @@ impl World
         !index as usize
     }
 
-    pub fn traverse_front_to_back(&self, position: &math::Vector3, visit_node: fn(usize, &Node) -> bool, visit_leaf: fn(usize, &Leaf))
+    pub fn traverse_front_to_back(&self, position: Vector3<f32>, visit_node: fn(usize, &Node) -> bool, visit_leaf: fn(usize, &Leaf))
     {
         let front_to_back = |plane: &Plane| plane.point_distance(position) >= 0.0;
         self.traverse_impl(0, &front_to_back, visit_node, visit_leaf);
     }
 
-    pub fn traverse_back_to_front(&self, position: &math::Vector3, visit_node: fn(usize, &Node) -> bool, visit_leaf: fn(usize, &Leaf))
+    pub fn traverse_back_to_front(&self, position: Vector3<f32>, visit_node: fn(usize, &Node) -> bool, visit_leaf: fn(usize, &Leaf))
     {
         let back_to_front = |plane: &Plane| plane.point_distance(position) < 0.0;
         self.traverse_impl(0, &back_to_front, visit_node, visit_leaf);

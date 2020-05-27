@@ -9,10 +9,10 @@ use std::env;
 use std::io::{Result, Error, ErrorKind};
 use std::io::prelude::*;
 
+use cgmath::Vector3;
 use image::{ImageBuffer, Rgb};
 
 mod bsp;
-mod math;
 mod entity;
 
 fn main() -> Result<()>
@@ -48,11 +48,11 @@ fn main() -> Result<()>
     println!("World summary:\n{}", world);
 
     // let v = math::Vector3::default();   // Should be leaf 1882 for q3dm13.bsp
-    let v = math::Vector3::new(-25.0, 300.0, 268.0);    // Should be leaf 2740 for q3dm13.bsp
-    println!("Leaf at position {} = index {}", v, world.leaf_at_position(&v));
+    let v = Vector3::new(-25.0, 300.0, 268.0);    // Should be leaf 2740 for q3dm13.bsp
+    println!("Leaf at position {:?} = index {}", v, world.leaf_at_position(v));
 
     // Traverse the BSP tree and print visited leafs using a lambda expression
-    world.traverse_front_to_back(&v, |_index, _node| true, |index, _leaf| print!("{} ", index));
+    world.traverse_front_to_back(v, |_index, _node| true, |index, _leaf| print!("{} ", index));
     println!("");
 
     let entities = entity::parse_entities(&world.entities);
