@@ -14,6 +14,8 @@ use image::{ImageBuffer, Rgb};
 
 mod bsp;
 mod entity;
+mod vkcore;
+mod vkbsp;
 
 fn main() -> Result<()>
 {
@@ -57,6 +59,8 @@ fn main() -> Result<()>
 
     let entities = entity::parse_entities(&world.entities);
     println!("{:?}", entities);
+
+    vkcore::init(world);
 
     Ok(())
 }

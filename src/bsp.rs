@@ -48,16 +48,16 @@ struct Lump
     length: i32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default, Clone, Copy)]
 #[repr(C)]
 pub struct Vertex
 {
     // We're using plain arrays here instead of cgmath types, because this allows us to use this data structure directly to create Vulkan vertex buffers
-    position: [f32; 3],
-    texture_coord: [f32; 2],
-    lightmap_coord: [f32; 2],
-    normal: [f32; 3],
-    color: [u8; 4],
+    pub position: [f32; 3],
+    pub texture_coord: [f32; 2],
+    pub lightmap_coord: [f32; 2],
+    pub normal: [f32; 3],
+    pub color: [u8; 4],
 }
 
 #[derive(Debug)]
@@ -78,10 +78,10 @@ pub struct Surface
     texture_id: i32,
     fog_id: i32,
     surface_type: SurfaceType,
-    first_vertex: i32,
-    num_vertices: i32,
-    first_index: i32,
-    num_indices: i32,
+    pub first_vertex: i32,
+    pub num_vertices: i32,
+    pub first_index: i32,
+    pub num_indices: i32,
     lightmap_id: i32,
     lightmap_corner: Vector2<i32>,
     lightmap_size: Vector2<i32>,
@@ -179,11 +179,11 @@ pub struct Lightmap
 #[repr(C)]
 pub struct Node
 {
-    plane: i32,
-    front: i32,
-    back: i32,
-    mins: Vector3<i32>,
-    maxs: Vector3<i32>,
+    pub plane: i32,
+    pub front: i32,
+    pub back: i32,
+    pub mins: Vector3<i32>,
+    pub maxs: Vector3<i32>,
 }
 
 #[derive(Debug)]
@@ -192,10 +192,10 @@ pub struct Leaf
 {
     cluster: i32,
     area: i32,
-    mins: Vector3<i32>,
-    maxs: Vector3<i32>,
-    first_surface: i32,
-    num_surfaces: i32,
+    pub mins: Vector3<i32>,
+    pub maxs: Vector3<i32>,
+    pub first_surface: i32,
+    pub num_surfaces: i32,
     first_brush: i32,
     num_brushes: i32,
 }
@@ -292,7 +292,7 @@ pub struct World
     pub leaf_brushes: Vec<i32>,
     pub brush_sides: Vec<BrushSide>,
     pub models: Vec<Model>,
-    pub indices: Vec<i32>,
+    pub indices: Vec<u32>,
     pub fogs: Vec<Fog>,
     pub light_volumes: Vec<LightVolume>,
     // TODO: bezier faces
@@ -541,7 +541,7 @@ pub fn load_world(file: &mut File) -> std::io::Result<World>
     world.models = read_lump_vec!(file, lump, Model);
 
     let lump = &lumps[LumpType::Indices as usize];
-    world.indices = read_lump_vec!(file, lump, i32);
+    world.indices = read_lump_vec!(file, lump, u32);
 
     let lump = &lumps[LumpType::Fogs as usize];
     world.fogs = read_lump_vec!(file, lump, Fog);
