@@ -8,6 +8,7 @@ pub struct Entity
 {
     pub class_name: String,
     pub origin: Vector3<f32>,
+    pub angle: f32,
     pub properties: HashMap<String, String>,
 }
 
@@ -15,7 +16,7 @@ impl Entity
 {
     pub fn default() -> Self
     {
-        Self { class_name: String::default(), origin: Vector3::<f32>::zero(), properties: HashMap::<String, String>::default() }
+        Self { class_name: String::default(), origin: Vector3::<f32>::zero(), angle: f32::default(), properties: HashMap::<String, String>::default() }
     }
 }
 
@@ -125,6 +126,11 @@ fn parse_entity(chars: &mut Chars<'_>) -> Option<Entity>
     if let Some(origin) = entity.properties.remove("origin")
     {
         entity.origin = parse_vector(&origin);
+    }
+
+    if let Some(angle) = entity.properties.remove("origin")
+    {
+        entity.angle = angle.parse::<f32>().unwrap_or_default();
     }
 
     Some(entity)

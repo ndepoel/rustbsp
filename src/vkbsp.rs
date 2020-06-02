@@ -25,6 +25,7 @@ use cgmath::prelude::*;
 
 use super::vkcore;
 use super::bsp;
+use super::entity;
 
 vulkano::impl_vertex!(bsp::Vertex, position, texture_coord, lightmap_coord, normal);
 
@@ -103,6 +104,7 @@ pub struct BspRenderer
     texture: Arc<dyn ImageViewAccess + Send + Sync>,
     sampler: Arc<Sampler>,
 
+    cam_pos: cgmath::Vector3<f32>,
     rotation_start: Instant,
 
     lightmaps: Vec<Arc<dyn ImageViewAccess + Send + Sync>>,
@@ -216,6 +218,13 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
         });
     }
 
+    let entities = entity::parse_entities(&world.entities);
+    let cam_pos = match entities.iter().find(|ent| ent.class_name == "info_player_deathmatch")
+    {
+        Some(ent) => ent.origin + cgmath::Vector3::new(0.0, 0.0, 50.0),
+        None => cgmath::Vector3::new(300.0, 40.0, 540.0)
+    };
+
     BspRenderer
     { 
         device: device.clone(), queue: queue.clone(),
@@ -225,6 +234,7 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
         vs_uniform_buffer: Arc::new(vs_uniform_buffer),
         texture: Arc::new(texture),
         sampler: sampler.clone(),
+        cam_pos: cam_pos,
         rotation_start: Instant::now(),
         lightmaps: lightmaps,
         surface_data: surface_data,
@@ -245,7 +255,7 @@ impl vkcore::RendererAbstract for BspRenderer
         // let cam_pos = cgmath::Vector3::new(center.x as f32, center.y as f32, center.z as f32);
 
         //let cam_pos = cgmath::Vector3::new(-25.0, 300.0, 268.0);
-        let cam_pos = cgmath::Vector3::new(300.0, 40.0, 540.0);
+        // let cam_pos = cgmath::Vector3::new(300.0, 40.0, 540.0);
 
         let time = self.rotation_start.elapsed().as_secs_f32();
         let angle = time * 30.0;
@@ -260,7 +270,7 @@ impl vkcore::RendererAbstract for BspRenderer
         view = view * cgmath::Matrix4::from_angle_y(cgmath::Deg(0.0));      // Roll
         view = view * cgmath::Matrix4::from_angle_x(cgmath::Deg(180.0));    // Pitch
         view = view * cgmath::Matrix4::from_angle_z(cgmath::Deg(-angle));   // Yaw
-        view = view * cgmath::Matrix4::from_translation(-cam_pos);
+        view = view * cgmath::Matrix4::from_translation(-self.cam_pos);
 
         let uniforms =
         {
@@ -269,7 +279,7 @@ impl vkcore::RendererAbstract for BspRenderer
                 model: cgmath::Matrix4::from_scale(1.0).into(), // Just an identity matrix; the world doesn't move
                 view: view.into(),
                 // TODO derive aspect ratio from viewport (not doing that right now as I'm going to move viewport out of dynamic state anyway)
-                proj: cgmath::perspective(cgmath::Deg(60.0), 16.0/9.0, 10.0, 10000.0).into(),
+                proj: cgmath::perspective(cgmath::Deg(60.0), 16.0/9.0, 5.0, 10000.0).into(),
             };
 
             Arc::new(self.vs_uniform_buffer.next(uniform_data).unwrap())
@@ -302,7 +312,7 @@ impl vkcore::RendererAbstract for BspRenderer
 
         let mut drawn_surfaces = Vec::new();
         drawn_surfaces.resize_with(self.world.surfaces.len(), Default::default);
-        builder = self.draw_node(0, cam_pos, &mut drawn_surfaces, builder, dynamic_state, uniform_set.clone());
+        builder = self.draw_node(0, self.cam_pos, &mut drawn_surfaces, builder, dynamic_state, uniform_set.clone());
 
         builder.end_render_pass().unwrap()
             .build().unwrap()
