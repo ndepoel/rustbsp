@@ -264,13 +264,9 @@ impl vkcore::RendererAbstract for BspRenderer
 
         let uniforms =
         {
-            // let height = (time * consts::FRAC_PI_4).sin();
             let uniform_data = vs::ty::Data
             {
-                // model: cgmath::Matrix4::from_angle_y(cgmath::Deg(angle)).into(),
-                model: cgmath::Matrix4::from_scale(1.0).into(),
-                // view: cgmath::Matrix4::look_at(cgmath::Point3::new(0.0, height, -2.0), cgmath::Point3::new(0.0, 0.0, 0.0), cgmath::Vector3::new(0.0, 1.0, 0.0)).into(),
-                // view: cgmath::Matrix4::look_at_dir(cgmath::Point3::from_vec(cam_pos), cgmath::Vector3::new(0.0, 0.0, 1.0), cgmath::Vector3::new(0.0, 1.0, 0.0)).into(),
+                model: cgmath::Matrix4::from_scale(1.0).into(), // Just an identity matrix; the world doesn't move
                 view: view.into(),
                 // TODO derive aspect ratio from viewport (not doing that right now as I'm going to move viewport out of dynamic state anyway)
                 proj: cgmath::perspective(cgmath::Deg(60.0), 16.0/9.0, 10.0, 10000.0).into(),
@@ -279,8 +275,7 @@ impl vkcore::RendererAbstract for BspRenderer
             Arc::new(self.vs_uniform_buffer.next(uniform_data).unwrap())
         };
 
-        // Since descriptor sets are meant to be persistent and not advised to be created in hot paths, should we build these ahead of time per surface? (and store as Arc<DescriptorSet>)
-        // Yeah, making these ahead of every draw call slows things down to a crawl. But how do we set a unique texture for each surface then? While also changing the uniform buffer per frame?
+        // For the uniform vertex data we need to update the descriptor set once every frame. This can be reused for all static objects.
         let layout = self.pipeline.descriptor_set_layout(0).unwrap();
         let uniform_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
             .add_buffer(uniforms.clone()).unwrap()
@@ -380,14 +375,6 @@ impl BspRenderer
 
     fn draw_surface(&self, surface: &SurfaceData, builder: AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>) -> AutoCommandBufferBuilder
     {
-        // // Since descriptor sets are meant to be persistent and not advised to be created in hot paths, should we build these ahead of time per surface? (and store as Arc<DescriptorSet>)
-        // let layout = self.pipeline.descriptor_set_layout(0).unwrap();
-        // let set = Arc::new(PersistentDescriptorSet::start(layout.clone())
-        //     .add_buffer(uniforms.clone()).unwrap()
-        //     .add_sampled_image(self.texture.clone(), self.sampler.clone()).unwrap()
-        //     .build().unwrap()
-        // );
-
         // TODO Building secondary command buffers per surface or leaf would probably speed this up a whole lot
         let sets = (uniforms.clone(), surface.descriptor_set.clone());
         builder.draw_indexed(self.pipeline.clone(), &dynamic_state, vec!(surface.vertex_slice.clone()), surface.index_slice.clone(), sets, ()).unwrap()
