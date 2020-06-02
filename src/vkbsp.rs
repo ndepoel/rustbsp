@@ -8,7 +8,7 @@ use vulkano::
     buffer::{ BufferUsage, ImmutableBuffer, cpu_pool::CpuBufferPool, BufferSlice, BufferAccess },
     framebuffer::{ FramebufferAbstract, Subpass, RenderPassAbstract },
     sync::GpuFuture,
-    descriptor::DescriptorSet,
+    descriptor::{ DescriptorSet, PipelineLayoutAbstract },
     descriptor::descriptor_set::{ DescriptorSetsCollection, PersistentDescriptorSet },
     image::{ ImmutableImage, Dimensions, traits::ImageViewAccess },
     format::{ Format },
@@ -71,6 +71,7 @@ mod fs {
             layout(location = 0) out vec4 f_color;
 
             layout(set = 1, binding = 0) uniform sampler2D mainTex;
+            layout(set = 1, binding = 1) uniform sampler2D lightTex;
 
             void main() {
                 float diffuse = clamp(dot(normalize(v_normal), v_lightdir), 0.0, 1.0);  // Fake some directional lighting
@@ -98,6 +99,24 @@ pub struct BspRenderer
     sampler: Arc<Sampler>,
 
     rotation_start: Instant,
+
+    lightmaps: Vec<Arc<dyn ImageViewAccess + Send + Sync>>,
+    surface_data: Vec<SurfaceData>,
+}
+
+struct SurfaceData
+{
+    // Not sure if we actually need to store these here. They're referenced in the descriptor set, and they should be managed centrally.
+    main_texture: Arc<dyn ImageViewAccess + Send + Sync>,
+    light_texture: Arc<dyn ImageViewAccess + Send + Sync>,
+
+    // TODO: also add pipeline reference here so we can vary shaders per surface (e.g. sky shader)
+
+    // These type designations are NOT nice, but using a BufferAccess trait here didn't cut it
+    vertex_slice: Arc<BufferSlice<[bsp::Vertex], Arc<ImmutableBuffer<[bsp::Vertex]>>>>,
+    index_slice: Arc<BufferSlice<[u32], Arc<ImmutableBuffer<[u32]>>>>,
+
+    descriptor_set: Arc<dyn DescriptorSet + Sync + Send>,
 }
 
 // We actually might want to pull the renderpass and framebuffer creation into here as well, to allow more flexibility in what and how we render. That's something for later though.
@@ -149,7 +168,38 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
         .build(device.clone())
         .unwrap());
 
-    BspRenderer 
+    let texture_layout = pipeline.descriptor_set_layout(1).unwrap();
+
+    let mut surface_data = Vec::with_capacity(world.surfaces.len());
+    for surface in &world.surfaces
+    {
+        surface_data.push({
+            let start_vert = surface.first_vertex as usize;
+            let end_vert = start_vert + surface.num_vertices as usize;
+            let vertex_slice = Arc::new(BufferSlice::from_typed_buffer_access(vertex_buffer.clone()).slice(start_vert .. end_vert).unwrap());
+    
+            let start_index = surface.first_index as usize;
+            let end_index = start_index + surface.num_indices as usize;
+            let index_slice = Arc::new(BufferSlice::from_typed_buffer_access(index_buffer.clone()).slice(start_index .. end_index).unwrap());
+            
+            let descriptor_set = Arc::new(PersistentDescriptorSet::start(texture_layout.clone())
+                .add_sampled_image(texture.clone(), sampler.clone()).unwrap()
+                .add_sampled_image(texture.clone(), sampler.clone()).unwrap()
+                .build().unwrap()
+            );
+
+            SurfaceData
+            {
+                main_texture: texture.clone(),  // TODO: actually load the required texture image
+                light_texture: texture.clone(), // TODO: actually upload the lightmap image
+                vertex_slice: vertex_slice.clone(),
+                index_slice: index_slice.clone(),
+                descriptor_set: descriptor_set.clone(),
+            }
+        });
+    }
+
+    BspRenderer
     { 
         device: device.clone(), queue: queue.clone(),
         world: world,
@@ -159,6 +209,7 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
         texture: Arc::new(texture),
         sampler: sampler.clone(),
         rotation_start: Instant::now(),
+        surface_data: surface_data,
     }
 }
 
@@ -210,13 +261,6 @@ impl vkcore::RendererAbstract for BspRenderer
             .build().unwrap()
         );
 
-        // By splitting this up, we can accomplish the above question. Uniform sets are created every frame, texture sets are created ahead-of-time and bound per surface.
-        let layout = self.pipeline.descriptor_set_layout(1).unwrap();
-        let texture_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
-            .add_sampled_image(self.texture.clone(), self.sampler.clone()).unwrap()
-            .build().unwrap()
-        );
-
         // The command buffer contains the instructions to be executed to render things specifically for this frame:
         // a single draw call contains the pipeline (i.e. material) to use, the vertex buffer (and indices) to use, and the dynamic rendering parameters to be passed to the shaders.
         let clear_values = vec!([0.1921, 0.3019, 0.4745, 1.0].into(), 1f32.into());
@@ -237,7 +281,7 @@ impl vkcore::RendererAbstract for BspRenderer
 
         let mut drawn_surfaces = Vec::new();
         drawn_surfaces.resize_with(self.world.surfaces.len(), Default::default);
-        builder = self.draw_node(0, cam_pos, &mut drawn_surfaces, builder, dynamic_state, vec![uniform_set.clone(), texture_set.clone()]);
+        builder = self.draw_node(0, cam_pos, &mut drawn_surfaces, builder, dynamic_state, uniform_set.clone());
 
         builder.end_render_pass().unwrap()
             .build().unwrap()
@@ -246,14 +290,14 @@ impl vkcore::RendererAbstract for BspRenderer
 
 impl BspRenderer
 {
-    fn draw_node(&self, node_index: i32, position: cgmath::Vector3<f32>, drawn_surfaces: &mut Vec<bool>, builder: AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, sets: Vec<Arc<dyn DescriptorSet + Sync + Send>>) -> AutoCommandBufferBuilder
+    fn draw_node(&self, node_index: i32, position: cgmath::Vector3<f32>, drawn_surfaces: &mut Vec<bool>, builder: AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>) -> AutoCommandBufferBuilder
     {
         let mut builder = builder;
 
         if node_index < 0
         {
             let leaf_index = !node_index as usize;
-            builder = self.draw_leaf(&self.world.leafs[leaf_index], drawn_surfaces, builder, dynamic_state, sets.clone());
+            builder = self.draw_leaf(&self.world.leafs[leaf_index], drawn_surfaces, builder, dynamic_state, uniforms.clone());
             return builder;
         }
 
@@ -274,12 +318,12 @@ impl BspRenderer
             last = node.front;
         }
 
-        builder = self.draw_node(first, position, drawn_surfaces, builder, dynamic_state, sets.clone());
-        builder = self.draw_node(last, position, drawn_surfaces, builder, dynamic_state, sets.clone());
+        builder = self.draw_node(first, position, drawn_surfaces, builder, dynamic_state, uniforms.clone());
+        builder = self.draw_node(last, position, drawn_surfaces, builder, dynamic_state, uniforms.clone());
         builder
     }
 
-    fn draw_leaf(&self, leaf: &bsp::Leaf, drawn_surfaces: &mut Vec<bool>, builder: AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, sets: Vec<Arc<dyn DescriptorSet + Sync + Send>>) -> AutoCommandBufferBuilder
+    fn draw_leaf(&self, leaf: &bsp::Leaf, drawn_surfaces: &mut Vec<bool>, builder: AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>) -> AutoCommandBufferBuilder
     {
         let mut builder = builder;
 
@@ -288,28 +332,20 @@ impl BspRenderer
             let surface_index = self.world.leaf_surfaces[leaf_surf_index as usize] as usize;
             if drawn_surfaces[surface_index]
             {
+                // Make sure we draw each surface only once
                 continue;
             }
 
-            let surface = &self.world.surfaces[surface_index];
-            builder = self.draw_surface(surface, builder, dynamic_state, sets.clone());
+            let surface = &self.surface_data[surface_index];
+            builder = self.draw_surface(surface, builder, dynamic_state, uniforms.clone());
             drawn_surfaces[surface_index] = true;
         }
 
         builder
     }
 
-    fn draw_surface(&self, surface: &bsp::Surface, builder: AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, sets: Vec<Arc<dyn DescriptorSet + Sync + Send>>) -> AutoCommandBufferBuilder
+    fn draw_surface(&self, surface: &SurfaceData, builder: AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>) -> AutoCommandBufferBuilder
     {
-        // Note: these slices can also be created ahead of time per surface
-        let start_vert = surface.first_vertex as usize;
-        let end_vert = start_vert + surface.num_vertices as usize;
-        let vertex_slice = Arc::new(BufferSlice::from_typed_buffer_access(self.vertex_buffer.clone()).slice(start_vert .. end_vert).unwrap());
-
-        let start_index = surface.first_index as usize;
-        let end_index = start_index + surface.num_indices as usize;
-        let index_slice = Arc::new(BufferSlice::from_typed_buffer_access(self.index_buffer.clone()).slice(start_index .. end_index).unwrap());
-
         // // Since descriptor sets are meant to be persistent and not advised to be created in hot paths, should we build these ahead of time per surface? (and store as Arc<DescriptorSet>)
         // let layout = self.pipeline.descriptor_set_layout(0).unwrap();
         // let set = Arc::new(PersistentDescriptorSet::start(layout.clone())
@@ -318,6 +354,7 @@ impl BspRenderer
         //     .build().unwrap()
         // );
 
-        builder.draw_indexed(self.pipeline.clone(), &dynamic_state, vec!(vertex_slice.clone()), index_slice.clone(), sets.clone(), ()).unwrap()
+        let sets = (uniforms.clone(), surface.descriptor_set.clone());
+        builder.draw_indexed(self.pipeline.clone(), &dynamic_state, vec!(surface.vertex_slice.clone()), surface.index_slice.clone(), sets, ()).unwrap()
     }
 }
