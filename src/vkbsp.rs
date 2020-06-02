@@ -221,7 +221,7 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
     let entities = entity::parse_entities(&world.entities);
     let cam_pos = match entities.iter().find(|ent| ent.class_name == "info_player_deathmatch")
     {
-        Some(ent) => ent.origin + cgmath::Vector3::new(0.0, 0.0, 50.0),
+        Some(ent) => ent.origin + cgmath::Vector3::new(0.0, 0.0, 70.0),
         None => cgmath::Vector3::new(300.0, 40.0, 540.0)
     };
 
