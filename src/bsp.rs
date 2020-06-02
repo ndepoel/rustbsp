@@ -60,7 +60,7 @@ pub struct Vertex
     pub color: [u8; 4],
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 #[repr(i32)]
 pub enum SurfaceType
 {
@@ -75,14 +75,14 @@ pub enum SurfaceType
 #[repr(C)]
 pub struct Surface
 {
-    texture_id: i32,
+    pub texture_id: i32,
     fog_id: i32,
-    surface_type: SurfaceType,
+    pub surface_type: SurfaceType,
     pub first_vertex: i32,
     pub num_vertices: i32,
     pub first_index: i32,
     pub num_indices: i32,
-    lightmap_id: i32,
+    pub lightmap_id: i32,
     lightmap_corner: Vector2<i32>,
     lightmap_size: Vector2<i32>,
     lightmap_pos: Vector3<f32>,

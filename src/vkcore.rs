@@ -76,7 +76,7 @@ pub fn init(world: bsp::World)
     let event_loop = EventLoop::new();
     let surface = WindowBuilder::new()
         .with_inner_size(winit::dpi::PhysicalSize::new(1920, 1080))
-        .with_title("Vulkano Test")
+        .with_title("Rust BSP (Vulkan)")
         .build_vk_surface(&event_loop, instance.clone()).unwrap();
 
     // surface.window().set_cursor_grab(true).unwrap();
@@ -88,9 +88,15 @@ pub fn init(world: bsp::World)
         let caps = surface.capabilities(physical)
             .expect("failed to get surface capabilities");
     
+        println!("Supported formats:");
+        for fmt in caps.supported_formats.iter()
+        {
+            println!("{:?}", fmt);
+        }
+
         let dimensions = caps.current_extent.unwrap_or([1920, 1080]);
         let alpha = caps.supported_composite_alpha.iter().next().unwrap();
-        let format = caps.supported_formats[0].0;
+        let format = caps.supported_formats[0].0;   // NOTE this now defaults to Unorm format. Not sure if we should prefer sRGB instead.
         println!("Dimensions: {:?}, alpha: {:?}, format: {:?}", dimensions, alpha, format);
 
         Swapchain::new(device.clone(), surface.clone(),

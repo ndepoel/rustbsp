@@ -14,6 +14,7 @@ use vulkano::
     format::{ Format },
     sampler::{ Sampler, SamplerAddressMode, Filter, MipmapMode },
 };
+use image::{ ImageBuffer, Rgb, Pixel };
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -74,9 +75,13 @@ mod fs {
             layout(set = 1, binding = 1) uniform sampler2D lightTex;
 
             void main() {
-                float diffuse = clamp(dot(normalize(v_normal), v_lightdir), 0.0, 1.0);  // Fake some directional lighting
+                float diffuse = clamp(dot(normalize(v_normal), v_lightdir), 0.0, 1.0);
                 vec4 texColor = texture(mainTex, v_tex_uv);
-                f_color = (0.3 + diffuse) * texColor;
+                vec4 lightColor = texture(lightTex, v_light_uv);
+
+                //f_color = (0.3 + diffuse) * texColor;     // Main texture with some fake directional lighting
+                f_color = lightColor;   // Just the lightmap
+                //f_color = vec4((v_normal + vec3(1, 1, 1)) * 0.5, 1.0);    // View-space normals
             }
         "
     }
@@ -151,10 +156,22 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
         tex
     };
 
+    let mut lightmaps = Vec::<Arc<dyn ImageViewAccess + Send + Sync>>::with_capacity(world.lightmaps.len());
+    for lightmap in &world.lightmaps
+    {
+        lightmaps.push({
+            let img = ImageBuffer::from_fn(bsp::LIGHTMAP_WIDTH as u32, bsp::LIGHTMAP_HEIGHT as u32, |x,y| { Rgb(lightmap.image[y as usize][x as usize]).to_rgba() });
+            let (w, h) = img.dimensions();
+            let (tex, future) = ImmutableImage::from_iter(img.into_raw().iter().cloned(), Dimensions::Dim2d { width: w, height: h }, Format::R8G8B8A8Unorm, queue.clone()).unwrap();
+            future.flush().unwrap();    // TODO We could probably collect futures and join them all at once instead of going through this sequentially
+            tex
+        });
+    }
+
     let sampler = Sampler::new(device.clone(), 
         Filter::Linear, Filter::Linear, MipmapMode::Linear, 
         SamplerAddressMode::ClampToEdge, SamplerAddressMode::ClampToEdge, SamplerAddressMode::ClampToEdge, 
-        0.0, 8.0, 0.0, 0.0).unwrap();
+        0.0, 1.0, 0.0, 0.0).unwrap();
 
     // A pipeline is sort of a description of a single material: it determines which shaders to use and sets up the static rendering parameters
     let pipeline = Arc::new(GraphicsPipeline::start()
@@ -181,17 +198,17 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
             let start_index = surface.first_index as usize;
             let end_index = start_index + surface.num_indices as usize;
             let index_slice = Arc::new(BufferSlice::from_typed_buffer_access(index_buffer.clone()).slice(start_index .. end_index).unwrap());
-            
+
             let descriptor_set = Arc::new(PersistentDescriptorSet::start(texture_layout.clone())
                 .add_sampled_image(texture.clone(), sampler.clone()).unwrap()
-                .add_sampled_image(texture.clone(), sampler.clone()).unwrap()
+                .add_sampled_image(lightmaps.get(surface.lightmap_id as usize).unwrap_or(&lightmaps[0]).clone(), sampler.clone()).unwrap()  // TODO: handle incorrect lightmap index more gracefully
                 .build().unwrap()
             );
 
             SurfaceData
             {
                 main_texture: texture.clone(),  // TODO: actually load the required texture image
-                light_texture: texture.clone(), // TODO: actually upload the lightmap image
+                light_texture: texture.clone(),
                 vertex_slice: vertex_slice.clone(),
                 index_slice: index_slice.clone(),
                 descriptor_set: descriptor_set.clone(),
@@ -209,6 +226,7 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
         texture: Arc::new(texture),
         sampler: sampler.clone(),
         rotation_start: Instant::now(),
+        lightmaps: lightmaps,
         surface_data: surface_data,
     }
 }
@@ -226,18 +244,26 @@ impl vkcore::RendererAbstract for BspRenderer
         // let center = (leaf.mins + leaf.maxs) / 2;
         // let cam_pos = cgmath::Vector3::new(center.x as f32, center.y as f32, center.z as f32);
 
-        let cam_pos = cgmath::Vector3::new(-25.0, 300.0, 268.0);
+        //let cam_pos = cgmath::Vector3::new(-25.0, 300.0, 268.0);
+        let cam_pos = cgmath::Vector3::new(300.0, 40.0, 540.0);
 
-        let q2vk = cgmath::Matrix4::from_cols(
+        let time = self.rotation_start.elapsed().as_secs_f32();
+        let angle = time * 30.0;
+
+        // Start off with a view matrix that moves us from Vulkan's coordinate system to Quake's (+Z is up)
+        let mut view = cgmath::Matrix4::from_cols(
             cgmath::Vector4::new(1.0, 0.0, 0.0, 0.0),
-            cgmath::Vector4::new(0.0, 0.0, -1.0, 0.0),
+            cgmath::Vector4::new(0.0, 0.0, 1.0, 0.0),
             cgmath::Vector4::new(0.0, 1.0, 0.0, 0.0),
             cgmath::Vector4::new(0.0, 0.0, 0.0, 1.0));
 
+        view = view * cgmath::Matrix4::from_angle_y(cgmath::Deg(0.0));      // Roll
+        view = view * cgmath::Matrix4::from_angle_x(cgmath::Deg(180.0));    // Pitch
+        view = view * cgmath::Matrix4::from_angle_z(cgmath::Deg(-angle));   // Yaw
+        view = view * cgmath::Matrix4::from_translation(-cam_pos);
+
         let uniforms =
         {
-            let time = self.rotation_start.elapsed().as_secs_f32();
-            let angle = time * 60.0;
             // let height = (time * consts::FRAC_PI_4).sin();
             let uniform_data = vs::ty::Data
             {
@@ -245,7 +271,7 @@ impl vkcore::RendererAbstract for BspRenderer
                 model: cgmath::Matrix4::from_scale(1.0).into(),
                 // view: cgmath::Matrix4::look_at(cgmath::Point3::new(0.0, height, -2.0), cgmath::Point3::new(0.0, 0.0, 0.0), cgmath::Vector3::new(0.0, 1.0, 0.0)).into(),
                 // view: cgmath::Matrix4::look_at_dir(cgmath::Point3::from_vec(cam_pos), cgmath::Vector3::new(0.0, 0.0, 1.0), cgmath::Vector3::new(0.0, 1.0, 0.0)).into(),
-                view: ((cgmath::Matrix4::from_translation(cam_pos) * cgmath::Matrix4::from_angle_y(cgmath::Deg(angle))).inverse_transform().unwrap() * q2vk).into(),
+                view: view.into(),
                 // TODO derive aspect ratio from viewport (not doing that right now as I'm going to move viewport out of dynamic state anyway)
                 proj: cgmath::perspective(cgmath::Deg(60.0), 16.0/9.0, 10.0, 10000.0).into(),
             };
@@ -336,6 +362,14 @@ impl BspRenderer
                 continue;
             }
 
+            let surface = &self.world.surfaces[surface_index];
+            let texture = &self.world.textures[surface.texture_id as usize];
+            if (surface.surface_type != bsp::SurfaceType::Planar && surface.surface_type != bsp::SurfaceType::Mesh) || texture.surface_flags.contains(bsp::SurfaceFlags::SKY)
+            {
+                // Patch surfaces will be rendered separately (using tessellation shaders) and sky surfaces require a different set of shaders
+                continue;
+            }
+
             let surface = &self.surface_data[surface_index];
             builder = self.draw_surface(surface, builder, dynamic_state, uniforms.clone());
             drawn_surfaces[surface_index] = true;
@@ -354,6 +388,7 @@ impl BspRenderer
         //     .build().unwrap()
         // );
 
+        // TODO Building secondary command buffers per surface or leaf would probably speed this up a whole lot
         let sets = (uniforms.clone(), surface.descriptor_set.clone());
         builder.draw_indexed(self.pipeline.clone(), &dynamic_state, vec!(surface.vertex_slice.clone()), surface.index_slice.clone(), sets, ()).unwrap()
     }

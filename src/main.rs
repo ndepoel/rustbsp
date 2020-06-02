@@ -41,7 +41,7 @@ fn main() -> Result<()>
     for i in 0..world.lightmaps.len()
     {
         let lm = &world.lightmaps[i];
-        let img = ImageBuffer::from_fn(bsp::LIGHTMAP_WIDTH as u32, bsp::LIGHTMAP_HEIGHT as u32, |x,y| { Rgb(lm.image[x as usize][y as usize]) });
+        let img = ImageBuffer::from_fn(bsp::LIGHTMAP_WIDTH as u32, bsp::LIGHTMAP_HEIGHT as u32, |x,y| { Rgb(lm.image[y as usize][x as usize]) });
         img.save(format!("lightmap-{}.png", i)).unwrap();
     }
 
