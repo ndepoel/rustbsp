@@ -163,6 +163,9 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
     {
         lightmaps.push({
             let img = ImageBuffer::from_fn(bsp::LIGHTMAP_WIDTH as u32, bsp::LIGHTMAP_HEIGHT as u32, |x,y| { Rgb(lightmap.image[y as usize][x as usize]).to_rgba() });
+            // Perform some image processing to clean up the lightmaps and make them look a bit sharper
+            let img = image::imageops::resize(&img, bsp::LIGHTMAP_WIDTH as u32 * 4, bsp::LIGHTMAP_HEIGHT as u32 * 4, image::imageops::FilterType::Gaussian);
+            let img = image::imageops::unsharpen(&img, 0.7, 2);
             let (w, h) = img.dimensions();
             let (tex, future) = ImmutableImage::from_iter(img.into_raw().iter().cloned(), Dimensions::Dim2d { width: w, height: h }, Format::R8G8B8A8Unorm, queue.clone()).unwrap();
             future.flush().unwrap();    // TODO We could probably collect futures and join them all at once instead of going through this sequentially
@@ -173,9 +176,10 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
     let sampler = Sampler::new(device.clone(), 
         Filter::Linear, Filter::Linear, MipmapMode::Linear, 
         SamplerAddressMode::ClampToEdge, SamplerAddressMode::ClampToEdge, SamplerAddressMode::ClampToEdge, 
-        0.0, 1.0, 0.0, 0.0).unwrap();
+        0.0, 16.0, 0.0, 0.0).unwrap();
 
     // A pipeline is sort of a description of a single material: it determines which shaders to use and sets up the static rendering parameters
+    // TODO create separate pipelines for planar surfaces, patches, meshes, sky
     let pipeline = Arc::new(GraphicsPipeline::start()
         .vertex_input_single_buffer::<bsp::Vertex>()
         .vertex_shader(vs.main_entry_point(), ())
@@ -378,7 +382,7 @@ impl BspRenderer
             let texture = &self.world.textures[surface.texture_id as usize];
             if (surface.surface_type != bsp::SurfaceType::Planar && surface.surface_type != bsp::SurfaceType::Mesh) || texture.surface_flags.contains(bsp::SurfaceFlags::SKY)
             {
-                // Patch surfaces will be rendered separately (using tessellation shaders) and sky surfaces require a different set of shaders
+                // Patch surfaces will be rendered separately (using tessellation shaders) and sky surfaces require a different set of shaders. Meshes don't use lightmaps so would also require a different shader.
                 continue;
             }
 

@@ -42,6 +42,8 @@ fn main() -> Result<()>
     {
         let lm = &world.lightmaps[i];
         let img = ImageBuffer::from_fn(bsp::LIGHTMAP_WIDTH as u32, bsp::LIGHTMAP_HEIGHT as u32, |x,y| { Rgb(lm.image[y as usize][x as usize]) });
+        let img = image::imageops::resize(&img, bsp::LIGHTMAP_WIDTH as u32 * 4, bsp::LIGHTMAP_HEIGHT as u32 * 4, image::imageops::FilterType::Gaussian);
+        let img = image::imageops::unsharpen(&img, 0.7, 2);
         img.save(format!("lightmap-{}.png", i)).unwrap();
     }
 
