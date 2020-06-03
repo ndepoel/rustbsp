@@ -19,13 +19,42 @@ use winit::{
 use vulkano_win::VkSurfaceBuild;
 
 use std::sync::Arc;
+use std::time::Instant;
+use std::f32::consts;
 
 use super::vkbsp;
 use super::bsp;
+use super::entity;
 
 pub trait RendererAbstract
 {
-    fn draw(&self, framebuffer: Arc<dyn FramebufferAbstract + Send + Sync>, dynamic_state: &mut DynamicState) -> AutoCommandBuffer;
+    fn draw(&self, camera: &Camera, framebuffer: Arc<dyn FramebufferAbstract + Send + Sync>, dynamic_state: &mut DynamicState) -> AutoCommandBuffer;
+}
+
+pub struct Camera
+{
+    pub position: cgmath::Vector3<f32>,
+    pub rotation: cgmath::Vector3<f32>, // Pitch, roll, yaw
+}
+
+impl Camera
+{
+    pub fn to_view_matrix(&self) -> cgmath::Matrix4<f32>
+    {
+        // Start off with a view matrix that moves us from Vulkan's coordinate system to Quake's (+Z is up)
+        let mut view = cgmath::Matrix4::from_cols(
+            cgmath::Vector4::new(1.0, 0.0, 0.0, 0.0),
+            cgmath::Vector4::new(0.0, 0.0, 1.0, 0.0),
+            cgmath::Vector4::new(0.0, 1.0, 0.0, 0.0),
+            cgmath::Vector4::new(0.0, 0.0, 0.0, 1.0));
+
+        view = view * cgmath::Matrix4::from_angle_y(cgmath::Deg(-self.rotation.y)); // Roll
+        view = view * cgmath::Matrix4::from_angle_x(cgmath::Deg(-self.rotation.x)); // Pitch
+        view = view * cgmath::Matrix4::from_angle_z(cgmath::Deg(-self.rotation.z)); // Yaw
+        view = view * cgmath::Matrix4::from_translation(-self.position);
+
+        view
+    }
 }
 
 pub fn init(world: bsp::World)
@@ -133,12 +162,22 @@ pub fn init(world: bsp::World)
         }
     ).unwrap());
 
+    let entities = entity::parse_entities(&world.entities);
+    let cam_pos = match entities.iter().find(|ent| ent.class_name == "info_player_deathmatch")
+    {
+        Some(ent) => ent.origin + cgmath::Vector3::new(0.0, 0.0, 70.0),
+        None => cgmath::Vector3::new(300.0, 40.0, 540.0)
+    };
+
     let renderer = vkbsp::init(device.clone(), queue.clone(), render_pass.clone(), world);
 
     // Create framebuffers from the images we created along with our swapchain
     let mut dynamic_state = DynamicState::none();
     let framebuffers = window_size_dependent_setup(device.clone(), &images, render_pass.clone(), &mut dynamic_state);
     let mut previous_frame_end = Some(Box::new(sync::now(device.clone())) as Box<dyn GpuFuture>);
+
+    let mut camera = Camera { position: cam_pos, rotation: cgmath::Vector3::new(180.0, 0.0, 0.0) };
+    let rotation_start = Instant::now();
 
     event_loop.run(move |event, _, control_flow| 
     {
@@ -157,9 +196,12 @@ pub fn init(world: bsp::World)
 
                 let (image_num, _suboptimal, acquire_future) = swapchain::acquire_next_image(swapchain.clone(), None).unwrap();  // TODO: match result and handle errors (including out-of-date swapchain)
 
+                let time = rotation_start.elapsed().as_secs_f32();
+                camera.rotation.z = time * 30.0;
+
                 // Build the command buffer; apparently building the command buffer on each frame IS expected (good to know)
                 // This would typically be delegated to another function where the actual setup of whatever you want to render would happen.
-                let command_buffer = renderer.draw(framebuffers[image_num].clone(), &mut dynamic_state);
+                let command_buffer = renderer.draw(&camera, framebuffers[image_num].clone(), &mut dynamic_state);
 
                 // Actually execute the command buffer on a queue and present the framebuffer to the screen
                 let future = previous_frame_end.take().unwrap()

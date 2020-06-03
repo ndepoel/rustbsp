@@ -17,15 +17,12 @@ use vulkano::
 use image::{ ImageBuffer, Rgb, Pixel };
 
 use std::sync::Arc;
-use std::time::Instant;
-use std::f32::consts;
 use std::ops::Deref;
 
 use cgmath::prelude::*;
 
 use super::vkcore;
 use super::bsp;
-use super::entity;
 
 vulkano::impl_vertex!(bsp::Vertex, position, texture_coord, lightmap_coord, normal);
 
@@ -103,9 +100,6 @@ pub struct BspRenderer
 
     texture: Arc<dyn ImageViewAccess + Send + Sync>,
     sampler: Arc<Sampler>,
-
-    cam_pos: cgmath::Vector3<f32>,
-    rotation_start: Instant,
 
     lightmaps: Vec<Arc<dyn ImageViewAccess + Send + Sync>>,
     surface_data: Vec<SurfaceData>,
@@ -222,13 +216,6 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
         });
     }
 
-    let entities = entity::parse_entities(&world.entities);
-    let cam_pos = match entities.iter().find(|ent| ent.class_name == "info_player_deathmatch")
-    {
-        Some(ent) => ent.origin + cgmath::Vector3::new(0.0, 0.0, 70.0),
-        None => cgmath::Vector3::new(300.0, 40.0, 540.0)
-    };
-
     BspRenderer
     { 
         device: device.clone(), queue: queue.clone(),
@@ -238,8 +225,6 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
         vs_uniform_buffer: Arc::new(vs_uniform_buffer),
         texture: Arc::new(texture),
         sampler: sampler.clone(),
-        cam_pos: cam_pos,
-        rotation_start: Instant::now(),
         lightmaps: lightmaps,
         surface_data: surface_data,
     }
@@ -248,7 +233,7 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
 impl vkcore::RendererAbstract for BspRenderer
 {
     // This will probably morph into a function that returns a bunch of CommandBuffers to execute eventually
-    fn draw(&self, framebuffer: Arc<dyn FramebufferAbstract + Send + Sync>, dynamic_state: &mut DynamicState) -> AutoCommandBuffer
+    fn draw(&self, camera: &vkcore::Camera, framebuffer: Arc<dyn FramebufferAbstract + Send + Sync>, dynamic_state: &mut DynamicState) -> AutoCommandBuffer
     {
         // let center = (self.world.nodes[0].mins + self.world.nodes[0].maxs) / 2;
         // let cam_pos = cgmath::Vector3::new(center.x as f32, center.y as f32, center.z as f32);
@@ -261,30 +246,15 @@ impl vkcore::RendererAbstract for BspRenderer
         //let cam_pos = cgmath::Vector3::new(-25.0, 300.0, 268.0);
         // let cam_pos = cgmath::Vector3::new(300.0, 40.0, 540.0);
 
-        let leaf_index = self.world.leaf_at_position(self.cam_pos);
+        let leaf_index = self.world.leaf_at_position(camera.position);
         let cam_leaf = &self.world.leafs[leaf_index];
-
-        let time = self.rotation_start.elapsed().as_secs_f32();
-        let angle = time * 30.0;
-
-        // Start off with a view matrix that moves us from Vulkan's coordinate system to Quake's (+Z is up)
-        let mut view = cgmath::Matrix4::from_cols(
-            cgmath::Vector4::new(1.0, 0.0, 0.0, 0.0),
-            cgmath::Vector4::new(0.0, 0.0, 1.0, 0.0),
-            cgmath::Vector4::new(0.0, 1.0, 0.0, 0.0),
-            cgmath::Vector4::new(0.0, 0.0, 0.0, 1.0));
-
-        view = view * cgmath::Matrix4::from_angle_y(cgmath::Deg(0.0));      // Roll
-        view = view * cgmath::Matrix4::from_angle_x(cgmath::Deg(180.0));    // Pitch
-        view = view * cgmath::Matrix4::from_angle_z(cgmath::Deg(-angle));   // Yaw
-        view = view * cgmath::Matrix4::from_translation(-self.cam_pos);
 
         let uniforms =
         {
             let uniform_data = vs::ty::Data
             {
                 model: cgmath::Matrix4::from_scale(1.0).into(), // Just an identity matrix; the world doesn't move
-                view: view.into(),
+                view: camera.to_view_matrix().into(),
                 // TODO derive aspect ratio from viewport (not doing that right now as I'm going to move viewport out of dynamic state anyway)
                 proj: cgmath::perspective(cgmath::Deg(60.0), 16.0/9.0, 5.0, 10000.0).into(),
             };
@@ -319,7 +289,7 @@ impl vkcore::RendererAbstract for BspRenderer
 
         let mut drawn_surfaces = Vec::new();
         drawn_surfaces.resize_with(self.world.surfaces.len(), Default::default);
-        builder = self.draw_node(0, self.cam_pos, cam_leaf.cluster, &mut drawn_surfaces, builder, dynamic_state, uniform_set.clone());
+        builder = self.draw_node(0, camera.position, cam_leaf.cluster, &mut drawn_surfaces, builder, dynamic_state, uniform_set.clone());
 
         builder.end_render_pass().unwrap()
             .build().unwrap()
