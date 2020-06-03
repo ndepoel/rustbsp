@@ -190,7 +190,7 @@ pub struct Node
 #[repr(C)]
 pub struct Leaf
 {
-    cluster: i32,
+    pub cluster: i32,
     area: i32,
     pub mins: Vector3<i32>,
     pub maxs: Vector3<i32>,
@@ -216,7 +216,13 @@ impl Plane
     }
 }
 
-// TODO: VisData
+#[derive(Debug, Default)]
+#[repr(C)]
+pub struct VisDataInfo
+{
+    num_vectors: i32,
+    vector_size: i32,
+}
 
 #[derive(Debug)]
 #[repr(C)]
@@ -286,7 +292,8 @@ pub struct World
     pub leafs: Vec<Leaf>,
     pub leaf_surfaces: Vec<i32>,
     pub planes: Vec<Plane>,
-    // TODO: visdata
+    pub visdata_info: VisDataInfo,
+    pub visdata_vecs: Vec<u8>,
     pub entities: String,
     pub brushes: Vec<Brush>,
     pub leaf_brushes: Vec<i32>,
@@ -386,6 +393,17 @@ impl World
         self.traverse_impl(first, front_first, visit_node, visit_leaf);
         self.traverse_impl(last, front_first, visit_node, visit_leaf);
     }
+
+    pub fn cluster_visible(&self, cluster: i32, test: i32) -> bool
+    {
+        if cluster < 0 { return true; } // If we're outside the map, everything will be considered visible
+
+        // PVS data contains cross-references between all leafs, tightly packed into bit strings.
+        // To decode it requires some nasty wrangling with bitwire operators that I'm not going to bother trying to understand right now.
+        let vec_index = cluster * self.visdata_info.vector_size + (test >> 3);
+        let vec = &self.visdata_vecs[vec_index as usize];
+        (vec & (1 << (test & 7))) != 0
+    }
 }
 
 impl fmt::Display for World
@@ -400,6 +418,7 @@ impl fmt::Display for World
         writeln!(f, "{} leafs", self.leafs.len())?;
         writeln!(f, "{} leaf surfaces", self.leaf_surfaces.len())?;
         writeln!(f, "{} planes", self.planes.len())?;
+        writeln!(f, "{} visdata bytes", self.visdata_vecs.len())?;
         writeln!(f, "{} entity chars", self.entities.len())?;
         writeln!(f, "{} brushes", self.brushes.len())?;
         writeln!(f, "{} leaf brushes", self.leaf_brushes.len())?;
@@ -524,6 +543,11 @@ pub fn load_world(file: &mut File) -> std::io::Result<World>
 
     let lump = &lumps[LumpType::Planes as usize];
     world.planes = read_lump_vec!(file, lump, Plane);
+
+    let lump = &lumps[LumpType::Visibility as usize];
+    file.seek(SeekFrom::Start(lump.offset as u64))?;
+    world.visdata_info = read_struct!(file, VisDataInfo);
+    file.take(world.visdata_info.num_vectors as u64 * world.visdata_info.vector_size as u64).read_to_end(&mut world.visdata_vecs)?;
 
     let lump = &lumps[LumpType::Entities as usize];
     world.entities = read_lump_str!(file, lump);

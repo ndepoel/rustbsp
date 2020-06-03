@@ -257,6 +257,9 @@ impl vkcore::RendererAbstract for BspRenderer
         //let cam_pos = cgmath::Vector3::new(-25.0, 300.0, 268.0);
         // let cam_pos = cgmath::Vector3::new(300.0, 40.0, 540.0);
 
+        let leaf_index = self.world.leaf_at_position(self.cam_pos);
+        let cam_leaf = &self.world.leafs[leaf_index];
+
         let time = self.rotation_start.elapsed().as_secs_f32();
         let angle = time * 30.0;
 
@@ -312,7 +315,7 @@ impl vkcore::RendererAbstract for BspRenderer
 
         let mut drawn_surfaces = Vec::new();
         drawn_surfaces.resize_with(self.world.surfaces.len(), Default::default);
-        builder = self.draw_node(0, self.cam_pos, &mut drawn_surfaces, builder, dynamic_state, uniform_set.clone());
+        builder = self.draw_node(0, self.cam_pos, cam_leaf.cluster, &mut drawn_surfaces, builder, dynamic_state, uniform_set.clone());
 
         builder.end_render_pass().unwrap()
             .build().unwrap()
@@ -321,14 +324,18 @@ impl vkcore::RendererAbstract for BspRenderer
 
 impl BspRenderer
 {
-    fn draw_node(&self, node_index: i32, position: cgmath::Vector3<f32>, drawn_surfaces: &mut Vec<bool>, builder: AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>) -> AutoCommandBufferBuilder
+    fn draw_node(&self, node_index: i32, position: cgmath::Vector3<f32>, cluster: i32, drawn_surfaces: &mut Vec<bool>, builder: AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>) -> AutoCommandBufferBuilder
     {
         let mut builder = builder;
 
         if node_index < 0
         {
             let leaf_index = !node_index as usize;
-            builder = self.draw_leaf(&self.world.leafs[leaf_index], drawn_surfaces, builder, dynamic_state, uniforms.clone());
+            let leaf = &self.world.leafs[leaf_index];
+            if self.world.cluster_visible(cluster, leaf.cluster)
+            {
+                builder = self.draw_leaf(leaf, drawn_surfaces, builder, dynamic_state, uniforms.clone());
+            }
             return builder;
         }
 
@@ -349,8 +356,8 @@ impl BspRenderer
             last = node.front;
         }
 
-        builder = self.draw_node(first, position, drawn_surfaces, builder, dynamic_state, uniforms.clone());
-        builder = self.draw_node(last, position, drawn_surfaces, builder, dynamic_state, uniforms.clone());
+        builder = self.draw_node(first, position, cluster, drawn_surfaces, builder, dynamic_state, uniforms.clone());
+        builder = self.draw_node(last, position, cluster, drawn_surfaces, builder, dynamic_state, uniforms.clone());
         builder
     }
 
@@ -385,7 +392,8 @@ impl BspRenderer
 
     fn draw_surface(&self, surface: &SurfaceData, builder: AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>) -> AutoCommandBufferBuilder
     {
-        // TODO Building secondary command buffers per surface or leaf would probably speed this up a whole lot
+        // TODO Building secondary command buffers per surface or leaf would probably speed this up a whole lot => tried it, but you can't pass dynamic state or per-frame uniforms to a pre-built secondary command buffer :/
+        // TODO This could possibly be done more efficiently using indirect drawing instead of using buffer slices, but I'm getting stuck with Vulkano's arcane type requirements
         let sets = (uniforms.clone(), surface.descriptor_set.clone());
         builder.draw_indexed(self.pipeline.clone(), &dynamic_state, vec!(surface.vertex_slice.clone()), surface.index_slice.clone(), sets, ()).unwrap()
     }

@@ -128,7 +128,7 @@ fn parse_entity(chars: &mut Chars<'_>) -> Option<Entity>
         entity.origin = parse_vector(&origin);
     }
 
-    if let Some(angle) = entity.properties.remove("origin")
+    if let Some(angle) = entity.properties.remove("angle")
     {
         entity.angle = angle.parse::<f32>().unwrap_or_default();
     }
