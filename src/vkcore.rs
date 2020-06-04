@@ -40,7 +40,6 @@ pub struct Camera
 
     mouse_sensitivity: f32,
     movement_speed: f32,
-    movement_multiplier: f32,
 }
 
 impl Camera
@@ -193,15 +192,15 @@ pub fn init(world: bsp::World)
 
     let mut camera = Camera
     { 
-        position: cam_pos, 
-        rotation: cgmath::Vector3::new(180.0, 0.0, 0.0), 
-        mouse_sensitivity: 0.1, 
-        movement_speed: 250.0, 
-        movement_multiplier: 1.0 
+        position: cam_pos,
+        rotation: cgmath::Vector3::new(180.0, 0.0, 0.0),
+        mouse_sensitivity: 0.08,
+        movement_speed: 250.0,
     };
     let start_time = Instant::now();
     let mut prev_time = 0.0;
     let mut movement = cgmath::Vector3::new(0.0, 0.0, 0.0);
+    let mut movement_multiplier = 1.0;
 
     event_loop.run(move |event, _, control_flow| 
     {
@@ -226,7 +225,7 @@ pub fn init(world: bsp::World)
 
                 if !movement.is_zero()
                 {
-                    camera.position += camera.to_quaternion() * movement.normalize() * time_delta * camera.movement_speed * camera.movement_multiplier;
+                    camera.position += camera.to_quaternion() * movement.normalize() * time_delta * camera.movement_speed * movement_multiplier;
                 }
 
                 // Build the command buffer; apparently building the command buffer on each frame IS expected (good to know)
@@ -274,7 +273,7 @@ pub fn init(world: bsp::World)
                     Some(VirtualKeyCode::D) => movement.x = value,
                     Some(VirtualKeyCode::Q) => movement.z = value,
                     Some(VirtualKeyCode::E) => movement.z = -value,
-                    Some(VirtualKeyCode::LShift) => camera.movement_multiplier = 1.0 + value * 0.7,
+                    Some(VirtualKeyCode::LShift) => movement_multiplier = 1.0 + value * 0.7,
                     _ => ()
                 };
             }
