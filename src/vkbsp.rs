@@ -178,6 +178,7 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
         .vertex_input_single_buffer::<bsp::Vertex>()
         .vertex_shader(vs.main_entry_point(), ())
         .triangle_list()
+        .cull_mode_front()
         .viewports_dynamic_scissors_irrelevant(1)
         .fragment_shader(fs.main_entry_point(), ())
         .depth_stencil_simple_depth()
