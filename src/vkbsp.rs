@@ -85,7 +85,7 @@ mod fs {
     }
 }
 
-pub struct BspRenderer
+struct BspRenderer
 {
     device: Arc<Device>,
     queue: Arc<Queue>,
@@ -102,16 +102,21 @@ pub struct BspRenderer
     sampler: Arc<Sampler>,
 
     lightmaps: Vec<Arc<dyn ImageViewAccess + Send + Sync>>,
-    surface_data: Vec<SurfaceData>,
+    surface_renderers: Vec<Box<dyn SurfaceRenderer>>,
 }
 
-struct SurfaceData
+trait SurfaceRenderer
 {
-    // Not sure if we actually need to store these here. They're referenced in the descriptor set, and they should be managed centrally.
-    main_texture: Arc<dyn ImageViewAccess + Send + Sync>,
-    light_texture: Arc<dyn ImageViewAccess + Send + Sync>,
+    fn draw_surface(&self, builder: AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>) -> AutoCommandBufferBuilder;
+}
 
-    // TODO: also add pipeline reference here so we can vary shaders per surface (e.g. sky shader)
+struct NoopSurfaceRenderer
+{
+}
+
+struct PlanarSurfaceRenderer
+{
+    pipeline: Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
 
     // These type designations are NOT nice, but using a BufferAccess trait here didn't cut it
     vertex_slice: Arc<BufferSlice<[bsp::Vertex], Arc<ImmutableBuffer<[bsp::Vertex]>>>>,
@@ -121,7 +126,7 @@ struct SurfaceData
 }
 
 // We actually might want to pull the renderpass and framebuffer creation into here as well, to allow more flexibility in what and how we render. That's something for later though.
-pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderPassAbstract + Send + Sync>, world: bsp::World) -> BspRenderer
+pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderPassAbstract + Send + Sync>, world: bsp::World) -> impl vkcore::RendererAbstract
 {
     // We upload all of the BSP's vertices and indices to the GPU at once into one giant buffer. Draw calls for individual surfaces will use slices into these buffers.
     let vertex_buffer =
@@ -188,31 +193,38 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
 
     let texture_layout = pipeline.descriptor_set_layout(1).unwrap();
 
-    let mut surface_data = Vec::with_capacity(world.surfaces.len());
+    let mut surface_renderers = Vec::<Box<dyn SurfaceRenderer>>::with_capacity(world.surfaces.len());
     for surface in &world.surfaces
     {
-        surface_data.push({
-            let start_vert = surface.first_vertex as usize;
-            let end_vert = start_vert + surface.num_vertices as usize;
-            let vertex_slice = Arc::new(BufferSlice::from_typed_buffer_access(vertex_buffer.clone()).slice(start_vert .. end_vert).unwrap());
-    
-            let start_index = surface.first_index as usize;
-            let end_index = start_index + surface.num_indices as usize;
-            let index_slice = Arc::new(BufferSlice::from_typed_buffer_access(index_buffer.clone()).slice(start_index .. end_index).unwrap());
-
-            let descriptor_set = Arc::new(PersistentDescriptorSet::start(texture_layout.clone())
-                .add_sampled_image(texture.clone(), sampler.clone()).unwrap()
-                .add_sampled_image(lightmaps.get(surface.lightmap_id as usize).unwrap_or(&lightmaps[0]).clone(), sampler.clone()).unwrap()  // TODO: handle incorrect lightmap index more gracefully
-                .build().unwrap()
-            );
-
-            SurfaceData
+        surface_renderers.push(
+        { 
+            match surface.surface_type
             {
-                main_texture: texture.clone(),  // TODO: actually load the required texture image
-                light_texture: texture.clone(),
-                vertex_slice: vertex_slice.clone(),
-                index_slice: index_slice.clone(),
-                descriptor_set: descriptor_set.clone(),
+                bsp::SurfaceType::Planar | bsp::SurfaceType::Mesh =>
+                {
+                    let start_vert = surface.first_vertex as usize;
+                    let end_vert = start_vert + surface.num_vertices as usize;
+                    let vertex_slice = Arc::new(BufferSlice::from_typed_buffer_access(vertex_buffer.clone()).slice(start_vert .. end_vert).unwrap());
+            
+                    let start_index = surface.first_index as usize;
+                    let end_index = start_index + surface.num_indices as usize;
+                    let index_slice = Arc::new(BufferSlice::from_typed_buffer_access(index_buffer.clone()).slice(start_index .. end_index).unwrap());
+
+                    let descriptor_set = Arc::new(PersistentDescriptorSet::start(texture_layout.clone())
+                        .add_sampled_image(texture.clone(), sampler.clone()).unwrap()   // TODO: actually load the required texture image
+                        .add_sampled_image(lightmaps.get(surface.lightmap_id as usize).unwrap_or(&lightmaps[0]).clone(), sampler.clone()).unwrap()  // TODO: handle incorrect lightmap index more gracefully
+                        .build().unwrap()
+                    );
+
+                    Box::new(PlanarSurfaceRenderer
+                    {
+                        pipeline: pipeline.clone(),
+                        vertex_slice: vertex_slice.clone(),
+                        index_slice: index_slice.clone(),
+                        descriptor_set: descriptor_set.clone(),
+                    })
+                }
+                _ => Box::new(NoopSurfaceRenderer {})
             }
         });
     }
@@ -227,7 +239,7 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
         texture: Arc::new(texture),
         sampler: sampler.clone(),
         lightmaps: lightmaps,
-        surface_data: surface_data,
+        surface_renderers: surface_renderers,
     }
 }
 
@@ -338,27 +350,37 @@ impl BspRenderer
                 continue;
             }
 
+            drawn_surfaces[surface_index] = true;
+
             let surface = &self.world.surfaces[surface_index];
             let texture = &self.world.textures[surface.texture_id as usize];
-            if (surface.surface_type != bsp::SurfaceType::Planar && surface.surface_type != bsp::SurfaceType::Mesh) || texture.surface_flags.contains(bsp::SurfaceFlags::SKY)
+            if texture.surface_flags.contains(bsp::SurfaceFlags::SKY)
             {
                 // Patch surfaces will be rendered separately (using tessellation shaders) and sky surfaces require a different set of shaders. Meshes don't use lightmaps so would also require a different shader.
                 continue;
             }
 
-            let surface = &self.surface_data[surface_index];
-            builder = self.draw_surface(surface, builder, dynamic_state, uniforms.clone());
-            drawn_surfaces[surface_index] = true;
+            let renderer = &self.surface_renderers[surface_index];
+            builder = renderer.draw_surface(builder, dynamic_state, uniforms.clone());
         }
 
         builder
     }
+}
 
-    fn draw_surface(&self, surface: &SurfaceData, builder: AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>) -> AutoCommandBufferBuilder
+impl SurfaceRenderer for NoopSurfaceRenderer
+{
+    fn draw_surface(&self, builder: AutoCommandBufferBuilder, _dynamic_state: &mut DynamicState, _uniforms: Arc<dyn DescriptorSet + Sync + Send>) -> AutoCommandBufferBuilder
     {
-        // TODO Building secondary command buffers per surface or leaf would probably speed this up a whole lot => tried it, but you can't pass dynamic state or per-frame uniforms to a pre-built secondary command buffer :/
-        // TODO This could possibly be done more efficiently using indirect drawing instead of using buffer slices, but I'm getting stuck with Vulkano's arcane type requirements
-        let sets = (uniforms.clone(), surface.descriptor_set.clone());
-        builder.draw_indexed(self.pipeline.clone(), &dynamic_state, vec!(surface.vertex_slice.clone()), surface.index_slice.clone(), sets, ()).unwrap()
+        builder
+    }
+}
+
+impl SurfaceRenderer for PlanarSurfaceRenderer
+{
+    fn draw_surface(&self, builder: AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>) -> AutoCommandBufferBuilder
+    {
+        let sets = (uniforms.clone(), self.descriptor_set.clone());
+        builder.draw_indexed(self.pipeline.clone(), &dynamic_state, vec!(self.vertex_slice.clone()), self.index_slice.clone(), sets, ()).unwrap()
     }
 }
