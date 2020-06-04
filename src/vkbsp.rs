@@ -235,17 +235,6 @@ impl vkcore::RendererAbstract for BspRenderer
     // This will probably morph into a function that returns a bunch of CommandBuffers to execute eventually
     fn draw(&self, camera: &vkcore::Camera, framebuffer: Arc<dyn FramebufferAbstract + Send + Sync>, dynamic_state: &mut DynamicState) -> AutoCommandBuffer
     {
-        // let center = (self.world.nodes[0].mins + self.world.nodes[0].maxs) / 2;
-        // let cam_pos = cgmath::Vector3::new(center.x as f32, center.y as f32, center.z as f32);
-
-        // let leaf_index = self.world.leaf_at_position(cam_pos);
-        // let leaf = &self.world.leafs[leaf_index];
-        // let center = (leaf.mins + leaf.maxs) / 2;
-        // let cam_pos = cgmath::Vector3::new(center.x as f32, center.y as f32, center.z as f32);
-
-        //let cam_pos = cgmath::Vector3::new(-25.0, 300.0, 268.0);
-        // let cam_pos = cgmath::Vector3::new(300.0, 40.0, 540.0);
-
         let leaf_index = self.world.leaf_at_position(camera.position);
         let cam_leaf = &self.world.leafs[leaf_index];
 

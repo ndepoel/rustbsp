@@ -14,13 +14,15 @@ use vulkano::{
 use winit::{
     event_loop::{ EventLoop, ControlFlow },
     window::{ WindowBuilder, Window },
-    event::{ Event, WindowEvent },
+    event::{ Event, WindowEvent, VirtualKeyCode, DeviceEvent, ElementState },
 };
 use vulkano_win::VkSurfaceBuild;
 
 use std::sync::Arc;
 use std::time::Instant;
 use std::f32::consts;
+
+use cgmath::prelude::*;
 
 use super::vkbsp;
 use super::bsp;
@@ -35,6 +37,10 @@ pub struct Camera
 {
     pub position: cgmath::Vector3<f32>,
     pub rotation: cgmath::Vector3<f32>, // Pitch, roll, yaw
+
+    mouse_sensitivity: f32,
+    movement_speed: f32,
+    movement_multiplier: f32,
 }
 
 impl Camera
@@ -42,18 +48,24 @@ impl Camera
     pub fn to_view_matrix(&self) -> cgmath::Matrix4<f32>
     {
         // Start off with a view matrix that moves us from Vulkan's coordinate system to Quake's (+Z is up)
-        let mut view = cgmath::Matrix4::from_cols(
+        let view = cgmath::Matrix4::from_cols(
             cgmath::Vector4::new(1.0, 0.0, 0.0, 0.0),
             cgmath::Vector4::new(0.0, 0.0, 1.0, 0.0),
             cgmath::Vector4::new(0.0, 1.0, 0.0, 0.0),
             cgmath::Vector4::new(0.0, 0.0, 0.0, 1.0));
 
-        view = view * cgmath::Matrix4::from_angle_y(cgmath::Deg(-self.rotation.y)); // Roll
-        view = view * cgmath::Matrix4::from_angle_x(cgmath::Deg(-self.rotation.x)); // Pitch
-        view = view * cgmath::Matrix4::from_angle_z(cgmath::Deg(-self.rotation.z)); // Yaw
-        view = view * cgmath::Matrix4::from_translation(-self.position);
+        view *
+            cgmath::Matrix4::from_angle_y(cgmath::Deg(-self.rotation.y)) *  // Roll
+            cgmath::Matrix4::from_angle_x(cgmath::Deg(-self.rotation.x)) *  // Pitch
+            cgmath::Matrix4::from_angle_z(cgmath::Deg(-self.rotation.z)) *  // Yaw
+            cgmath::Matrix4::from_translation(-self.position)
+    }
 
-        view
+    pub fn to_quaternion(&self) -> cgmath::Quaternion<f32>
+    {
+        cgmath::Quaternion::from_angle_z(cgmath::Deg(self.rotation.z)) *
+        cgmath::Quaternion::from_angle_x(cgmath::Deg(self.rotation.x)) *
+        cgmath::Quaternion::from_angle_y(cgmath::Deg(self.rotation.y))
     }
 }
 
@@ -92,6 +104,9 @@ pub fn init(world: bsp::World)
         let features = Features
         {
             sampler_anisotropy: true,
+            tessellation_shader: true,
+            image_cube_array: true,
+            fill_mode_non_solid: true,
             .. Features::none()
         };
         Device::new(physical, &features, &device_ext,
@@ -108,8 +123,8 @@ pub fn init(world: bsp::World)
         .with_title("Rust BSP (Vulkan)")
         .build_vk_surface(&event_loop, instance.clone()).unwrap();
 
-    // surface.window().set_cursor_grab(true).unwrap();
-    // surface.window().set_cursor_visible(false);
+    surface.window().set_cursor_grab(true).unwrap();
+    surface.window().set_cursor_visible(false);
 
     // Create a swapchain for double buffered rendering
     let (swapchain, images) = 
@@ -176,8 +191,17 @@ pub fn init(world: bsp::World)
     let framebuffers = window_size_dependent_setup(device.clone(), &images, render_pass.clone(), &mut dynamic_state);
     let mut previous_frame_end = Some(Box::new(sync::now(device.clone())) as Box<dyn GpuFuture>);
 
-    let mut camera = Camera { position: cam_pos, rotation: cgmath::Vector3::new(180.0, 0.0, 0.0) };
-    let rotation_start = Instant::now();
+    let mut camera = Camera
+    { 
+        position: cam_pos, 
+        rotation: cgmath::Vector3::new(180.0, 0.0, 0.0), 
+        mouse_sensitivity: 0.1, 
+        movement_speed: 250.0, 
+        movement_multiplier: 1.0 
+    };
+    let start_time = Instant::now();
+    let mut prev_time = 0.0;
+    let mut movement = cgmath::Vector3::new(0.0, 0.0, 0.0);
 
     event_loop.run(move |event, _, control_flow| 
     {
@@ -190,14 +214,20 @@ pub fn init(world: bsp::World)
                 *control_flow = ControlFlow::Exit;
             },
             Event::WindowEvent { event: WindowEvent::Resized(_), .. } => { },   // Ignoring this for now, normally you'd recreate the swapchain and framebuffers here
-            Event::RedrawEventsCleared =>
+            Event::MainEventsCleared =>
             {
+                let time = start_time.elapsed().as_secs_f32();
+                let time_delta = time - prev_time;
+                prev_time = time;
+
                 previous_frame_end.as_mut().unwrap().cleanup_finished();
 
                 let (image_num, _suboptimal, acquire_future) = swapchain::acquire_next_image(swapchain.clone(), None).unwrap();  // TODO: match result and handle errors (including out-of-date swapchain)
 
-                let time = rotation_start.elapsed().as_secs_f32();
-                camera.rotation.z = time * 30.0;
+                if !movement.is_zero()
+                {
+                    camera.position += camera.to_quaternion() * movement.normalize() * time_delta * camera.movement_speed * camera.movement_multiplier;
+                }
 
                 // Build the command buffer; apparently building the command buffer on each frame IS expected (good to know)
                 // This would typically be delegated to another function where the actual setup of whatever you want to render would happen.
@@ -221,6 +251,33 @@ pub fn init(world: bsp::World)
                     }
                 }
             },
+            Event::WindowEvent { event: WindowEvent::KeyboardInput { input, .. }, .. } =>
+            {
+                match input.virtual_keycode
+                {
+                    Some(VirtualKeyCode::Escape) => { *control_flow = ControlFlow::Exit; }
+                    _ => ()
+                };
+            },
+            Event::DeviceEvent { event: DeviceEvent::MouseMotion { delta }, .. } =>
+            {
+                camera.rotation += cgmath::Vector3::new(-delta.1 as f32, 0.0, -delta.0 as f32) * camera.mouse_sensitivity;
+            },
+            Event::DeviceEvent { event: DeviceEvent::Key(input), .. } =>
+            {
+                let value = if input.state == ElementState::Pressed { 1.0 } else { 0.0 };
+                match input.virtual_keycode
+                {
+                    Some(VirtualKeyCode::W) => movement.y = -value,
+                    Some(VirtualKeyCode::S) => movement.y = value,
+                    Some(VirtualKeyCode::A) => movement.x = -value,
+                    Some(VirtualKeyCode::D) => movement.x = value,
+                    Some(VirtualKeyCode::Q) => movement.z = value,
+                    Some(VirtualKeyCode::E) => movement.z = -value,
+                    Some(VirtualKeyCode::LShift) => camera.movement_multiplier = 1.0 + value * 0.7,
+                    _ => ()
+                };
+            }
             _ => ()
         }
     });
