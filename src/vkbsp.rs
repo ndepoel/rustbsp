@@ -38,7 +38,6 @@ mod vs {
             layout(location = 0) out vec3 v_normal;
             layout(location = 1) out vec2 v_tex_uv;
             layout(location = 2) out vec2 v_light_uv;
-            layout(location = 3) out vec3 v_lightdir;
 
             layout(set = 0, binding = 0) uniform Data {
                 mat4 model;
@@ -52,7 +51,79 @@ mod vs {
                 v_tex_uv = texture_coord;
                 v_light_uv = lightmap_coord;
                 v_normal = transpose(inverse(mat3(modelview))) * normal;
-                v_lightdir = mat3(uniforms.view) * normalize(vec3(0.2, -0.5, -1));
+            }
+        "
+    }
+}
+
+mod tcs {
+    vulkano_shaders::shader!{
+        ty: "tess_ctrl",
+        src: "#version 450
+            layout(vertices = 9) out;
+
+            layout(location = 0) in vec3 v_normal[];
+            layout(location = 1) in vec2 v_tex_uv[];
+            layout(location = 2) in vec2 v_light_uv[];
+
+            layout(location = 0) out vec3 tc_normal[];
+            layout(location = 1) out vec2 tc_tex_uv[];
+            layout(location = 2) out vec2 tc_light_uv[];
+
+            void main() {
+                gl_out[gl_InvocationID].gl_Position = gl_in[gl_InvocationID].gl_Position;
+                tc_normal[gl_InvocationID] = v_normal[gl_InvocationID];
+                tc_tex_uv[gl_InvocationID] = v_tex_uv[gl_InvocationID];
+                tc_light_uv[gl_InvocationID] = v_light_uv[gl_InvocationID];
+
+                gl_TessLevelInner[0] = 10;
+                gl_TessLevelInner[1] = 10;
+                gl_TessLevelOuter[0] = 10;
+                gl_TessLevelOuter[1] = 10;
+                gl_TessLevelOuter[2] = 10;
+                gl_TessLevelOuter[3] = 10;
+            }
+        "
+    }
+}
+
+mod tes {
+    vulkano_shaders::shader!{
+        ty: "tess_eval",
+        src: "#version 450
+            layout(quads, equal_spacing) in;
+
+            layout(location = 0) in vec3 tc_normal[];
+            layout(location = 1) in vec2 tc_tex_uv[];
+            layout(location = 2) in vec2 tc_light_uv[];
+        
+            layout(location = 0) out vec3 te_normal;
+            layout(location = 1) out vec2 te_tex_uv;
+            layout(location = 2) out vec2 te_light_uv;
+
+            void main() {
+                gl_Position = vec4(0, 0, 0, 0);
+                te_normal = vec3(0, 0, 0);
+                te_tex_uv = vec2(0, 0);
+                te_light_uv = vec2(0, 0);
+
+                vec2 tmp = 1.0 - gl_TessCoord.xy;
+                vec3 bx = vec3(tmp.x * tmp.x, 2 * gl_TessCoord.x * tmp.x, gl_TessCoord.x * gl_TessCoord.x);
+                vec3 by = vec3(tmp.y * tmp.y, 2 * gl_TessCoord.y * tmp.y, gl_TessCoord.y * gl_TessCoord.y);
+
+                for (int i = 0; i < 3; i++)
+                {
+                    for (int j = 0; j < 3; j++)
+                    {
+                        float b = bx[i] * by[j];
+                        int n = i * 3 + j;
+
+                        gl_Position += gl_in[n].gl_Position * b;
+                        te_normal += tc_normal[n] * b;
+                        te_tex_uv += tc_tex_uv[n] * b;
+                        te_light_uv += tc_light_uv[n] * b;
+                    }
+                }
             }
         "
     }
@@ -65,7 +136,6 @@ mod fs {
             layout(location = 0) in vec3 v_normal;
             layout(location = 1) in vec2 v_tex_uv;
             layout(location = 2) in vec2 v_light_uv;
-            layout(location = 3) in vec3 v_lightdir;
 
             layout(location = 0) out vec4 f_color;
 
@@ -73,11 +143,9 @@ mod fs {
             layout(set = 1, binding = 1) uniform sampler2D lightTex;
 
             void main() {
-                float diffuse = clamp(dot(normalize(v_normal), v_lightdir), 0.0, 1.0);
                 vec4 texColor = texture(mainTex, v_tex_uv);
                 vec4 lightColor = texture(lightTex, v_light_uv);
 
-                //f_color = (0.3 + diffuse) * texColor;     // Main texture with some fake directional lighting
                 f_color = lightColor;   // Just the lightmap
                 //f_color = vec4((v_normal + vec3(1, 1, 1)) * 0.5, 1.0);    // View-space normals
             }
@@ -125,6 +193,13 @@ struct PlanarSurfaceRenderer
     descriptor_set: Arc<dyn DescriptorSet + Sync + Send>,
 }
 
+struct PatchSurfaceRenderer
+{
+    pipeline: Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
+    vertex_slice: Arc<BufferSlice<[bsp::Vertex], Arc<ImmutableBuffer<[bsp::Vertex]>>>>,
+    descriptor_set: Arc<dyn DescriptorSet + Sync + Send>,
+}
+
 // We actually might want to pull the renderpass and framebuffer creation into here as well, to allow more flexibility in what and how we render. That's something for later though.
 pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderPassAbstract + Send + Sync>, world: bsp::World) -> impl vkcore::RendererAbstract
 {
@@ -144,6 +219,8 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
     };
 
     let vs = vs::Shader::load(device.clone()).unwrap();
+    let tcs = tcs::Shader::load(device.clone()).unwrap();
+    let tes = tes::Shader::load(device.clone()).unwrap();
     let fs = fs::Shader::load(device.clone()).unwrap();
 
     let vs_uniform_buffer = CpuBufferPool::<vs::ty::Data>::new(device.clone(), BufferUsage::uniform_buffer());
@@ -191,7 +268,17 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
         .build(device.clone())
         .unwrap());
 
-    let texture_layout = pipeline.descriptor_set_layout(1).unwrap();
+    let patch_pipeline = Arc::new(GraphicsPipeline::start()
+        .vertex_input_single_buffer::<bsp::Vertex>()
+        .vertex_shader(vs.main_entry_point(), ())
+        .tessellation_shaders(tcs.main_entry_point(), (), tes.main_entry_point(), ())
+        .patch_list(9)
+        .viewports_dynamic_scissors_irrelevant(1)
+        .fragment_shader(fs.main_entry_point(), ())
+        .depth_stencil_simple_depth()
+        .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
+        .build(device.clone())
+        .unwrap());
 
     let mut surface_renderers = Vec::<Box<dyn SurfaceRenderer>>::with_capacity(world.surfaces.len());
     for surface in &world.surfaces
@@ -210,7 +297,8 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
                     let end_index = start_index + surface.num_indices as usize;
                     let index_slice = Arc::new(BufferSlice::from_typed_buffer_access(index_buffer.clone()).slice(start_index .. end_index).unwrap());
 
-                    let descriptor_set = Arc::new(PersistentDescriptorSet::start(texture_layout.clone())
+                    let layout = pipeline.descriptor_set_layout(1).unwrap();
+                    let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
                         .add_sampled_image(texture.clone(), sampler.clone()).unwrap()   // TODO: actually load the required texture image
                         .add_sampled_image(lightmaps.get(surface.lightmap_id as usize).unwrap_or(&lightmaps[0]).clone(), sampler.clone()).unwrap()  // TODO: handle incorrect lightmap index more gracefully
                         .build().unwrap()
@@ -223,7 +311,27 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
                         index_slice: index_slice.clone(),
                         descriptor_set: descriptor_set.clone(),
                     })
-                }
+                },
+                bsp::SurfaceType::Patch =>
+                {
+                    let start_vert = surface.first_vertex as usize;
+                    let end_vert = start_vert + 9;//surface.num_vertices as usize;
+                    let vertex_slice = Arc::new(BufferSlice::from_typed_buffer_access(vertex_buffer.clone()).slice(start_vert .. end_vert).unwrap());
+
+                    let layout = patch_pipeline.descriptor_set_layout(1).unwrap();
+                    let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
+                        .add_sampled_image(texture.clone(), sampler.clone()).unwrap()   // TODO: actually load the required texture image
+                        .add_sampled_image(lightmaps.get(surface.lightmap_id as usize).unwrap_or(&lightmaps[0]).clone(), sampler.clone()).unwrap()  // TODO: handle incorrect lightmap index more gracefully
+                        .build().unwrap()
+                    );
+
+                    Box::new(PatchSurfaceRenderer
+                    {
+                        pipeline: patch_pipeline.clone(),
+                        vertex_slice: vertex_slice.clone(),
+                        descriptor_set: descriptor_set.clone(),
+                    })
+                },
                 _ => Box::new(NoopSurfaceRenderer {})
             }
         });
@@ -382,5 +490,14 @@ impl SurfaceRenderer for PlanarSurfaceRenderer
     {
         let sets = (uniforms.clone(), self.descriptor_set.clone());
         builder.draw_indexed(self.pipeline.clone(), &dynamic_state, vec!(self.vertex_slice.clone()), self.index_slice.clone(), sets, ()).unwrap()
+    }
+}
+
+impl SurfaceRenderer for PatchSurfaceRenderer
+{
+    fn draw_surface(&self, builder: AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>) -> AutoCommandBufferBuilder
+    {
+        let sets = (uniforms.clone(), self.descriptor_set.clone());
+        builder.draw(self.pipeline.clone(), &dynamic_state, vec!(self.vertex_slice.clone()), sets, ()).unwrap()
     }
 }
