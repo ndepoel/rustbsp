@@ -13,7 +13,7 @@ use vulkano::{
 };
 use winit::{
     event_loop::{ EventLoop, ControlFlow },
-    window::{ WindowBuilder, Window },
+    window::{ WindowBuilder, Window, Fullscreen },
     event::{ Event, WindowEvent, VirtualKeyCode, DeviceEvent, ElementState },
 };
 use vulkano_win::VkSurfaceBuild;
@@ -68,7 +68,7 @@ impl Camera
     }
 }
 
-pub fn init(world: bsp::World)
+pub fn init(world: bsp::World, fullscreen: bool)
 {
     // Create the Vulkan instance with whatever is required to draw to a window
     let instance = 
@@ -124,6 +124,7 @@ pub fn init(world: bsp::World)
 
     surface.window().set_cursor_grab(true).unwrap();
     surface.window().set_cursor_visible(false);
+    surface.window().set_fullscreen(if fullscreen { Some(Fullscreen::Borderless(surface.window().primary_monitor())) } else { None });
 
     // Create a swapchain for double buffered rendering
     let (swapchain, images) = 

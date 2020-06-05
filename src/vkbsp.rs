@@ -251,14 +251,14 @@ impl vkcore::RendererAbstract for BspRenderer
         let leaf_index = self.world.leaf_at_position(camera.position);
         let cam_leaf = &self.world.leafs[leaf_index];
 
+        let viewport = &dynamic_state.viewports.as_ref().unwrap()[0];
         let uniforms =
         {
             let uniform_data = vs::ty::Data
             {
                 model: cgmath::Matrix4::from_scale(1.0).into(), // Just an identity matrix; the world doesn't move
                 view: camera.to_view_matrix().into(),
-                // TODO derive aspect ratio from viewport (not doing that right now as I'm going to move viewport out of dynamic state anyway)
-                proj: cgmath::perspective(cgmath::Deg(60.0), 16.0/9.0, 5.0, 10000.0).into(),
+                proj: cgmath::perspective(cgmath::Deg(60.0), viewport.dimensions[0] / viewport.dimensions[1], 5.0, 10000.0).into(),
             };
 
             Arc::new(self.vs_uniform_buffer.next(uniform_data).unwrap())

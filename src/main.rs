@@ -62,7 +62,14 @@ fn main() -> Result<()>
     let entities = entity::parse_entities(&world.entities);
     println!("{:?}", entities);
 
-    vkcore::init(world);
+    let map_name = match entities.iter().find(|ent| ent.class_name == "worldspawn").and_then(|ent| ent.properties.get("message"))
+    {
+        Some(msg) => msg,
+        None => "Unknown",
+    };
+    println!("Map name: {}", map_name);
+
+    vkcore::init(world, false);
 
     Ok(())
 }
