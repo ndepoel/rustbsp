@@ -60,7 +60,7 @@ mod tcs {
     vulkano_shaders::shader!{
         ty: "tess_ctrl",
         src: "#version 450
-            layout(vertices = 9) out;
+            layout(vertices = 9) out;   // Patches are defined by a 3x3 grid of control points
 
             layout(location = 0) in vec3 v_normal[];
             layout(location = 1) in vec2 v_tex_uv[];
@@ -76,22 +76,24 @@ mod tcs {
                 tc_tex_uv[gl_InvocationID] = v_tex_uv[gl_InvocationID];
                 tc_light_uv[gl_InvocationID] = v_light_uv[gl_InvocationID];
 
-                gl_TessLevelInner[0] = 10;
-                gl_TessLevelInner[1] = 10;
-                gl_TessLevelOuter[0] = 10;
-                gl_TessLevelOuter[1] = 10;
-                gl_TessLevelOuter[2] = 10;
-                gl_TessLevelOuter[3] = 10;
+                gl_TessLevelInner[0] = 20;
+                gl_TessLevelInner[1] = 20;
+                gl_TessLevelOuter[0] = 20;
+                gl_TessLevelOuter[1] = 20;
+                gl_TessLevelOuter[2] = 20;
+                gl_TessLevelOuter[3] = 20;
             }
         "
     }
 }
 
+// Quake 3 patch surfaces are bi-quadratic Bezier surfaces.
+// This tessellation shader takes 9 control values per vertex element and evaluates them.
 mod tes {
     vulkano_shaders::shader!{
         ty: "tess_eval",
         src: "#version 450
-            layout(quads, equal_spacing) in;
+            layout(quads, equal_spacing, cw) in;    // We use quad topology because Quake 3's patches are rectangular
 
             layout(location = 0) in vec3 tc_normal[];
             layout(location = 1) in vec2 tc_tex_uv[];
@@ -275,6 +277,7 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
         .tessellation_shaders(tcs.main_entry_point(), (), tes.main_entry_point(), ())
         .patch_list(9)
         //.polygon_mode_line()
+        .cull_mode_front()
         .viewports_dynamic_scissors_irrelevant(1)
         .fragment_shader(fs.main_entry_point(), ())
         .depth_stencil_simple_depth()
@@ -320,6 +323,8 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
                     let end_vert = start_vert + surface.num_vertices as usize;
                     let vertex_slice = Arc::new(BufferSlice::from_typed_buffer_access(vertex_buffer.clone()).slice(start_vert .. end_vert).unwrap());
 
+                    // The vertex buffer from the BSP created above has all the vertices tightly packed with minimal duplication.
+                    // Vulkan's tessellation pipeline expects each patch to have a full set of 9 control points, so we have to generate an index list here to provide all of the control points in the right order.
                     let index_buffer =
                     {
                         let mut patch_indices = Vec::new();
