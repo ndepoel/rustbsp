@@ -178,10 +178,10 @@ pub fn init(world: bsp::World, fullscreen: bool)
     ).unwrap());
 
     let entities = entity::parse_entities(&world.entities);
-    let cam_pos = match entities.iter().find(|ent| ent.class_name == "info_player_deathmatch")
+    let (cam_pos, cam_rot) = match entities.iter().find(|ent| ent.class_name == "info_player_deathmatch")
     {
-        Some(ent) => ent.origin + cgmath::Vector3::new(0.0, 0.0, 70.0),
-        None => cgmath::Vector3::new(300.0, 40.0, 540.0)
+        Some(ent) => (ent.origin + cgmath::Vector3::new(0.0, 0.0, 70.0), cgmath::Vector3::new(180.0, 0.0, ent.angle - 90.0)),
+        None => (cgmath::Vector3::new(300.0, 40.0, 540.0), cgmath::Vector3::new(180.0, 0.0, 0.0))
     };
 
     let renderer = vkbsp::init(device.clone(), queue.clone(), render_pass.clone(), world);
@@ -194,7 +194,7 @@ pub fn init(world: bsp::World, fullscreen: bool)
     let mut camera = Camera
     { 
         position: cam_pos,
-        rotation: cgmath::Vector3::new(180.0, 0.0, 0.0),
+        rotation: cam_rot,
         mouse_sensitivity: 0.08,
         movement_speed: 250.0,
     };
