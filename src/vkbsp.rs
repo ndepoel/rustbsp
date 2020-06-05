@@ -197,6 +197,7 @@ struct PatchSurfaceRenderer
 {
     pipeline: Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
     vertex_slice: Arc<BufferSlice<[bsp::Vertex], Arc<ImmutableBuffer<[bsp::Vertex]>>>>,
+    index_buffer: Arc<ImmutableBuffer<[u32]>>,  // This renderer has its own index buffer, to break apart the surface into separate patches of 9 vertices each
     descriptor_set: Arc<dyn DescriptorSet + Sync + Send>,
 }
 
@@ -273,6 +274,7 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
         .vertex_shader(vs.main_entry_point(), ())
         .tessellation_shaders(tcs.main_entry_point(), (), tes.main_entry_point(), ())
         .patch_list(9)
+        //.polygon_mode_line()
         .viewports_dynamic_scissors_irrelevant(1)
         .fragment_shader(fs.main_entry_point(), ())
         .depth_stencil_simple_depth()
@@ -315,8 +317,32 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
                 bsp::SurfaceType::Patch =>
                 {
                     let start_vert = surface.first_vertex as usize;
-                    let end_vert = start_vert + 9;//surface.num_vertices as usize;
+                    let end_vert = start_vert + surface.num_vertices as usize;
                     let vertex_slice = Arc::new(BufferSlice::from_typed_buffer_access(vertex_buffer.clone()).slice(start_vert .. end_vert).unwrap());
+
+                    let index_buffer =
+                    {
+                        let mut patch_indices = Vec::new();
+                        let patch_count = cgmath::Vector2::new((surface.patch_size[0] - 1) / 2, (surface.patch_size[1] - 1) / 2);
+                        for y in 0..patch_count.y
+                        {
+                            for x in 0..patch_count.x
+                            {
+                                let start = 2 * y * surface.patch_size[0] + 2 * x;
+                                for i in 0..3
+                                {
+                                    for j in 0..3
+                                    {
+                                        patch_indices.push((start + i * surface.patch_size[0] + j) as u32);
+                                    }
+                                }
+                            }
+                        }
+
+                        let (buf, future) = ImmutableBuffer::from_iter(patch_indices.iter().cloned(), BufferUsage::index_buffer(), queue.clone()).unwrap();
+                        future.flush().unwrap();
+                        buf
+                    };
 
                     let layout = patch_pipeline.descriptor_set_layout(1).unwrap();
                     let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
@@ -329,6 +355,7 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
                     {
                         pipeline: patch_pipeline.clone(),
                         vertex_slice: vertex_slice.clone(),
+                        index_buffer: index_buffer.clone(),
                         descriptor_set: descriptor_set.clone(),
                     })
                 },
@@ -498,6 +525,6 @@ impl SurfaceRenderer for PatchSurfaceRenderer
     fn draw_surface(&self, builder: AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>) -> AutoCommandBufferBuilder
     {
         let sets = (uniforms.clone(), self.descriptor_set.clone());
-        builder.draw(self.pipeline.clone(), &dynamic_state, vec!(self.vertex_slice.clone()), sets, ()).unwrap()
+        builder.draw_indexed(self.pipeline.clone(), &dynamic_state, vec!(self.vertex_slice.clone()), self.index_buffer.clone(), sets, ()).unwrap()
     }
 }

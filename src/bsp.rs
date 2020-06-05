@@ -87,8 +87,8 @@ pub struct Surface
     lightmap_size: Vector2<i32>,
     lightmap_pos: Vector3<f32>,
     lightmap_vecs: [Vector3<f32>; 2],  // for patches, [0] and [1] are lodbounds
-    normal: Vector3<f32>,
-    patch_size: Vector2<i32>,
+    pub normal: Vector3<f32>,
+    pub patch_size: Vector2<i32>,
 }
 
 bitflags!
