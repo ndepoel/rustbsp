@@ -14,7 +14,7 @@ use vulkano::{
 use winit::{
     event_loop::{ EventLoop, ControlFlow },
     window::{ WindowBuilder, Window, Fullscreen },
-    event::{ Event, WindowEvent, VirtualKeyCode, DeviceEvent, ElementState },
+    event::{ Event, WindowEvent, VirtualKeyCode, DeviceEvent, ElementState, MouseButton },
 };
 use vulkano_win::VkSurfaceBuild;
 
@@ -271,12 +271,13 @@ pub fn init(world: bsp::World, fullscreen: bool)
             {
                 target_rotation += cgmath::Vector3::new(-delta.1 as f32, 0.0, -delta.0 as f32) * camera.mouse_sensitivity;
             },
-            Event::DeviceEvent { event: DeviceEvent::Button { button, state }, .. } =>
+            Event::WindowEvent { event: WindowEvent::MouseInput { button, state, .. }, .. } =>
             {
                 let value = if state == ElementState::Pressed { 1.0 } else { 0.0 };
                 match button
                 {
-                    1 => movement.y = -value,
+                    MouseButton::Left => movement.y = -value,
+                    MouseButton::Right => movement.z = -value,
                     _ => ()
                 };
             },
