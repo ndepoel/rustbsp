@@ -245,10 +245,10 @@ pub struct BrushSide
 #[repr(C)]
 pub struct Model
 {
-    mins: Vector3<f32>,
-    maxs: Vector3<f32>,
-    first_surface: i32,
-    num_surfaces: i32,
+    pub mins: Vector3<f32>,
+    pub maxs: Vector3<f32>,
+    pub first_surface: i32,
+    pub num_surfaces: i32,
     first_brush: i32,
     num_brushes: i32,
 }

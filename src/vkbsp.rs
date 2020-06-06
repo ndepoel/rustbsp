@@ -263,6 +263,7 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
         .vertex_input_single_buffer::<bsp::Vertex>()
         .vertex_shader(vs.main_entry_point(), ())
         .triangle_list()
+        //.polygon_mode_line()
         .cull_mode_front()
         .viewports_dynamic_scissors_irrelevant(1)
         .fragment_shader(fs.main_entry_point(), ())
@@ -433,6 +434,16 @@ impl vkcore::RendererAbstract for BspRenderer
         drawn_surfaces.resize_with(self.world.surfaces.len(), Default::default);
         builder = self.draw_node(0, camera.position, cam_leaf.cluster, &mut drawn_surfaces, builder, dynamic_state, uniform_set.clone());
 
+        for model in self.world.models.iter().skip(1)   // Model 0 appears to be a special model containing ALL surfaces, which we clearly do not want to render
+        {
+            // This is a rather crude visibility check using only the model's center point but it works well enough
+            let model_leaf = self.world.leaf_at_position((model.mins + model.maxs) * 0.5);
+            if self.world.cluster_visible(cam_leaf.cluster, self.world.leafs[model_leaf].cluster)
+            {
+                builder = self.draw_model(model, &mut drawn_surfaces, builder, dynamic_state, uniform_set.clone());
+            }
+        }
+
         builder.end_render_pass().unwrap()
             .build().unwrap()
     }
@@ -499,6 +510,28 @@ impl BspRenderer
                 // Patch surfaces will be rendered separately (using tessellation shaders) and sky surfaces require a different set of shaders. Meshes don't use lightmaps so would also require a different shader.
                 continue;
             }
+
+            let renderer = &self.surface_renderers[surface_index];
+            builder = renderer.draw_surface(builder, dynamic_state, uniforms.clone());
+        }
+
+        builder
+    }
+
+    fn draw_model(&self, model: &bsp::Model, drawn_surfaces: &mut Vec<bool>, builder: AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>) -> AutoCommandBufferBuilder
+    {
+        let mut builder = builder;
+
+        for model_surf_index in model.first_surface..(model.first_surface + model.num_surfaces)
+        {
+            let surface_index = model_surf_index as usize;
+            if drawn_surfaces[surface_index]
+            {
+                // Make sure we draw each surface only once
+                continue;
+            }
+
+            drawn_surfaces[surface_index] = true;
 
             let renderer = &self.surface_renderers[surface_index];
             builder = renderer.draw_surface(builder, dynamic_state, uniforms.clone());
