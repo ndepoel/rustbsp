@@ -203,6 +203,7 @@ pub fn init(world: bsp::World, fullscreen: bool)
     let mut movement = cgmath::Vector3::new(0.0, 0.0, 0.0);
     let mut movement_multiplier = 1.0;
 
+    let mut smooth_cam = false;
     let mut target_position = camera.position;
     let mut target_rotation = camera.rotation;
 
@@ -232,8 +233,9 @@ pub fn init(world: bsp::World, fullscreen: bool)
                     target_position += camera.to_quaternion() * movement.normalize() * time_delta * camera.movement_speed * movement_multiplier;
                 }
 
-                camera.position = camera.position.lerp(target_position, time_delta * 2.0);
-                camera.rotation = camera.rotation.lerp(target_rotation, time_delta * 2.0);
+                let amount = if smooth_cam { time_delta * 2.0 } else { 1.0 };
+                camera.position = camera.position.lerp(target_position, amount);
+                camera.rotation = camera.rotation.lerp(target_rotation, amount);
 
                 // Build the command buffer; apparently building the command buffer on each frame IS expected (good to know)
                 // This would typically be delegated to another function where the actual setup of whatever you want to render would happen.
@@ -280,7 +282,8 @@ pub fn init(world: bsp::World, fullscreen: bool)
             },
             Event::DeviceEvent { event: DeviceEvent::Key(input), .. } =>
             {
-                let value = if input.state == ElementState::Pressed { 1.0 } else { 0.0 };
+                let pressed = input.state == ElementState::Pressed;
+                let value = if pressed { 1.0 } else { 0.0 };
                 match input.virtual_keycode
                 {
                     Some(VirtualKeyCode::W) => movement.y = -value,
@@ -290,6 +293,7 @@ pub fn init(world: bsp::World, fullscreen: bool)
                     Some(VirtualKeyCode::Q) => movement.z = value,
                     Some(VirtualKeyCode::E) => movement.z = -value,
                     Some(VirtualKeyCode::LShift) => movement_multiplier = 1.0 + value * 0.7,
+                    Some(VirtualKeyCode::F1) => if pressed { smooth_cam = !smooth_cam; },
                     _ => ()
                 };
             }
