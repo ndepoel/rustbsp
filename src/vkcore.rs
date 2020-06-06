@@ -263,6 +263,15 @@ pub fn init(world: bsp::World, fullscreen: bool)
             {
                 camera.rotation += cgmath::Vector3::new(-delta.1 as f32, 0.0, -delta.0 as f32) * camera.mouse_sensitivity;
             },
+            Event::DeviceEvent { event: DeviceEvent::Button { button, state }, .. } =>
+            {
+                let value = if state == ElementState::Pressed { 1.0 } else { 0.0 };
+                match button
+                {
+                    1 => movement.y = -value,
+                    _ => ()
+                };
+            },
             Event::DeviceEvent { event: DeviceEvent::Key(input), .. } =>
             {
                 let value = if input.state == ElementState::Pressed { 1.0 } else { 0.0 };
