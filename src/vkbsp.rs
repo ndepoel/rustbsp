@@ -155,13 +155,15 @@ mod fs {
 
             layout(set = 1, binding = 0) uniform sampler2D mainTex;
             layout(set = 1, binding = 1) uniform sampler2D lightmapTex;
+            layout(set = 1, binding = 2) uniform sampler3D lightgridTex;
 
             void main() {
                 vec4 texColor = texture(mainTex, v_tex_uv);
                 vec4 lightmapColor = texture(lightmapTex, v_lightmap_uv);
 
-                f_color = lightmapColor;   // Just the lightmap
+                //f_color = lightmapColor;   // Just the lightmap
                 //f_color = vec4((normalize(v_normal) + vec3(1, 1, 1)) * 0.5, 1.0);    // World-space normals
+                f_color = texture(lightgridTex, v_lightgrid_uv);    // Light grid color (sort of prehistoric GI)
             }
         "
     }
@@ -243,6 +245,11 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
 
     let vs_uniform_buffer = CpuBufferPool::<vs::ty::Data>::new(device.clone(), BufferUsage::uniform_buffer());
 
+    let sampler = Sampler::new(device.clone(), 
+        Filter::Linear, Filter::Linear, MipmapMode::Linear, 
+        SamplerAddressMode::ClampToEdge, SamplerAddressMode::ClampToEdge, SamplerAddressMode::ClampToEdge, 
+        0.0, 16.0, 0.0, 0.0).unwrap();
+
     let texture =
     {
         let img = image::open("image_img.png").unwrap().into_rgba();
@@ -269,11 +276,24 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
 
     let (dimensions, lightgrid_offset, lightgrid_scale) = world.lightgrid_dimensions();
     println!("Lightgrid dimensions = {:?}, offset = {:?}, scale = {:?}", dimensions, lightgrid_offset, lightgrid_scale);
-
-    let sampler = Sampler::new(device.clone(), 
-        Filter::Linear, Filter::Linear, MipmapMode::Linear, 
-        SamplerAddressMode::ClampToEdge, SamplerAddressMode::ClampToEdge, SamplerAddressMode::ClampToEdge, 
-        0.0, 16.0, 0.0, 0.0).unwrap();
+    let lightgrid_tex =
+    {
+        let (w, h, d) = dimensions.into();
+        let grid_size = w * h * d;
+        let mut buf = Vec::new();
+        buf.resize_with(grid_size * 4, Default::default);
+        for i in 0..grid_size
+        {
+            let light_volume = &world.light_volumes[i];
+            buf[i * 4 + 0] = light_volume.ambient[0];
+            buf[i * 4 + 1] = light_volume.ambient[1];
+            buf[i * 4 + 2] = light_volume.ambient[2];
+            buf[i * 4 + 3] = 255;
+        }
+        let (tex, future) = ImmutableImage::from_iter(buf.iter().cloned(), Dimensions::Dim3d { width: w as u32, height: h as u32, depth: d as u32 }, Format::R8G8B8A8Unorm, queue.clone()).unwrap();
+        future.flush().unwrap();
+        tex
+    };
 
     // A pipeline is sort of a description of a single material: it determines which shaders to use and sets up the static rendering parameters
     // TODO create separate pipelines for planar surfaces, patches, meshes, sky
@@ -325,6 +345,7 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
                     let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
                         .add_sampled_image(texture.clone(), sampler.clone()).unwrap()   // TODO: actually load the required texture image
                         .add_sampled_image(lightmaps.get(surface.lightmap_id as usize).unwrap_or(&lightmaps[0]).clone(), sampler.clone()).unwrap()  // TODO: handle incorrect lightmap index more gracefully
+                        .add_sampled_image(lightgrid_tex.clone(), sampler.clone()).unwrap()
                         .build().unwrap()
                     );
 
@@ -370,6 +391,7 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
                     let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
                         .add_sampled_image(texture.clone(), sampler.clone()).unwrap()   // TODO: actually load the required texture image
                         .add_sampled_image(lightmaps.get(surface.lightmap_id as usize).unwrap_or(&lightmaps[0]).clone(), sampler.clone()).unwrap()  // TODO: handle incorrect lightmap index more gracefully
+                        .add_sampled_image(lightgrid_tex.clone(), sampler.clone()).unwrap()
                         .build().unwrap()
                     );
 

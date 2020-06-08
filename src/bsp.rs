@@ -274,9 +274,9 @@ impl Fog
 #[repr(C)]
 pub struct LightVolume
 {
-    ambient: [u8; 3],
-    directional: [u8; 3],
-    direction: [u8; 2],
+    pub ambient: [u8; 3],
+    pub directional: [u8; 3],
+    pub direction: [u8; 2],
 }
 
 #[derive(Default)]  // This allows us to create an empty instance without having to initialize all the fields manually.
@@ -404,13 +404,13 @@ impl World
 
     // Returns: grid dimensions, offset, scale
     // Can be used to create a 3D texture from the light grid, as well as generate UV's for this texture from world-space coordinates
-    pub fn lightgrid_dimensions(&self) -> (Vector3::<i32>, Vector3::<f32>, Vector3::<f32>)
+    pub fn lightgrid_dimensions(&self) -> (Vector3::<usize>, Vector3::<f32>, Vector3::<f32>)
     {
         let x = (self.models[0].maxs[0] / 64.0).floor() - (self.models[0].mins[0] / 64.0).ceil() + 1.0;
         let y = (self.models[0].maxs[1] / 64.0).floor() - (self.models[0].mins[1] / 64.0).ceil() + 1.0;
         let z = (self.models[0].maxs[2] / 128.0).floor() - (self.models[0].mins[2] / 128.0).ceil() + 1.0;
 
-        (Vector3::new(x as i32, y as i32, z as i32), -self.models[0].mins, Vector3::new(1.0 / (64.0 * x), 1.0 / (64.0 * y), 1.0 / (128.0 * z)))
+        (Vector3::new(x as usize, y as usize, z as usize), -self.models[0].mins, 1.0 / (self.models[0].maxs - self.models[0].mins))
     }
 }
 
