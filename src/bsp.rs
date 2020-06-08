@@ -279,8 +279,6 @@ pub struct LightVolume
     direction: [u8; 2],
 }
 
-// TODO: Bezier Patches/Faces
-
 #[derive(Default)]  // This allows us to create an empty instance without having to initialize all the fields manually.
 pub struct World
 {
@@ -302,7 +300,6 @@ pub struct World
     pub indices: Vec<u32>,
     pub fogs: Vec<Fog>,
     pub light_volumes: Vec<LightVolume>,
-    // TODO: bezier faces
 }
 
 impl World
@@ -403,6 +400,17 @@ impl World
         let vec_index = cluster * self.visdata_info.vector_size + (test >> 3);
         let vec = &self.visdata_vecs[vec_index as usize];
         (vec & (1 << (test & 7))) != 0
+    }
+
+    // Returns: grid dimensions, offset, scale
+    // Can be used to create a 3D texture from the light grid, as well as generate UV's for this texture from world-space coordinates
+    pub fn lightgrid_dimensions(&self) -> (Vector3::<i32>, Vector3::<f32>, Vector3::<f32>)
+    {
+        let x = (self.models[0].maxs[0] / 64.0).floor() - (self.models[0].mins[0] / 64.0).ceil() + 1.0;
+        let y = (self.models[0].maxs[1] / 64.0).floor() - (self.models[0].mins[1] / 64.0).ceil() + 1.0;
+        let z = (self.models[0].maxs[2] / 128.0).floor() - (self.models[0].mins[2] / 128.0).ceil() + 1.0;
+
+        (Vector3::new(x as i32, y as i32, z as i32), -self.models[0].mins, Vector3::new(1.0 / (64.0 * x), 1.0 / (64.0 * y), 1.0 / (128.0 * z)))
     }
 }
 

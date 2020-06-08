@@ -243,14 +243,17 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
         lightmaps.push({
             let img = ImageBuffer::from_fn(bsp::LIGHTMAP_WIDTH as u32, bsp::LIGHTMAP_HEIGHT as u32, |x,y| { Rgb(lightmap.image[y as usize][x as usize]).to_rgba() });
             // Perform some image processing to clean up the lightmaps and make them look a bit sharper
-            let img = image::imageops::resize(&img, bsp::LIGHTMAP_WIDTH as u32 * 4, bsp::LIGHTMAP_HEIGHT as u32 * 4, image::imageops::FilterType::Gaussian);
-            let img = image::imageops::unsharpen(&img, 0.7, 2);
+            // let img = image::imageops::resize(&img, bsp::LIGHTMAP_WIDTH as u32 * 4, bsp::LIGHTMAP_HEIGHT as u32 * 4, image::imageops::FilterType::Gaussian);
+            // let img = image::imageops::unsharpen(&img, 0.7, 2);
             let (w, h) = img.dimensions();
             let (tex, future) = ImmutableImage::from_iter(img.into_raw().iter().cloned(), Dimensions::Dim2d { width: w, height: h }, Format::R8G8B8A8Unorm, queue.clone()).unwrap();
             future.flush().unwrap();    // TODO We could probably collect futures and join them all at once instead of going through this sequentially
             tex
         });
     }
+
+    let (dimensions, offset, scale) = world.lightgrid_dimensions();
+    println!("Lightgrid dimensions = {:?}, offset = {:?}, scale = {:?}", dimensions, offset, scale);
 
     let sampler = Sampler::new(device.clone(), 
         Filter::Linear, Filter::Linear, MipmapMode::Linear, 
@@ -289,18 +292,18 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
     let mut surface_renderers = Vec::<Box<dyn SurfaceRenderer>>::with_capacity(world.surfaces.len());
     for surface in &world.surfaces
     {
+        let start_vert = surface.first_vertex as usize;
+        let end_vert = start_vert + surface.num_vertices as usize;
+        let start_index = surface.first_index as usize;
+        let end_index = start_index + surface.num_indices as usize;
+
         surface_renderers.push(
         { 
             match surface.surface_type
             {
                 bsp::SurfaceType::Planar | bsp::SurfaceType::Mesh =>
                 {
-                    let start_vert = surface.first_vertex as usize;
-                    let end_vert = start_vert + surface.num_vertices as usize;
                     let vertex_slice = Arc::new(BufferSlice::from_typed_buffer_access(vertex_buffer.clone()).slice(start_vert .. end_vert).unwrap());
-            
-                    let start_index = surface.first_index as usize;
-                    let end_index = start_index + surface.num_indices as usize;
                     let index_slice = Arc::new(BufferSlice::from_typed_buffer_access(index_buffer.clone()).slice(start_index .. end_index).unwrap());
 
                     let layout = pipeline.descriptor_set_layout(1).unwrap();
@@ -320,8 +323,6 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
                 },
                 bsp::SurfaceType::Patch =>
                 {
-                    let start_vert = surface.first_vertex as usize;
-                    let end_vert = start_vert + surface.num_vertices as usize;
                     let vertex_slice = Arc::new(BufferSlice::from_typed_buffer_access(vertex_buffer.clone()).slice(start_vert .. end_vert).unwrap());
 
                     // The vertex buffer from the BSP created above has all the vertices tightly packed with minimal duplication.
@@ -399,7 +400,7 @@ impl vkcore::RendererAbstract for BspRenderer
             {
                 model: cgmath::Matrix4::from_scale(1.0).into(), // Just an identity matrix; the world doesn't move
                 view: camera.to_view_matrix().into(),
-                proj: cgmath::perspective(cgmath::Deg(60.0), viewport.dimensions[0] / viewport.dimensions[1], 5.0, 10000.0).into(),
+                proj: cgmath::perspective(cgmath::Deg(60.0), viewport.dimensions[0] / viewport.dimensions[1], 8.0, 8000.0).into(),
             };
 
             Arc::new(self.vs_uniform_buffer.next(uniform_data).unwrap())
