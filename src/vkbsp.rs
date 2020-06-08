@@ -10,7 +10,7 @@ use vulkano::
     sync::GpuFuture,
     descriptor::{ DescriptorSet, PipelineLayoutAbstract },
     descriptor::descriptor_set::{ DescriptorSetsCollection, PersistentDescriptorSet },
-    image::{ ImmutableImage, Dimensions, traits::ImageViewAccess },
+    image::{ ImmutableImage, Dimensions, traits::ImageViewAccess, sys::ImageCreationError },
     format::{ Format },
     sampler::{ Sampler, SamplerAddressMode, Filter, MipmapMode },
 };
@@ -155,7 +155,13 @@ mod fs {
 
             layout(set = 1, binding = 0) uniform sampler2D mainTex;
             layout(set = 1, binding = 1) uniform sampler2D lightmapTex;
-            layout(set = 1, binding = 2) uniform sampler3D lightgridTex;
+            layout(set = 1, binding = 2) uniform sampler3D lightgridTexA;
+            layout(set = 1, binding = 3) uniform sampler3D lightgridTexB;
+
+            vec3 decode_latlng(float lat, float lng)
+            {
+                return normalize(vec3(cos(lat) * sin(lng), sin(lat) * sin(lng), cos(lng)));
+            }
 
             void main() {
                 vec4 texColor = texture(mainTex, v_tex_uv);
@@ -163,7 +169,14 @@ mod fs {
 
                 //f_color = lightmapColor;   // Just the lightmap
                 //f_color = vec4((normalize(v_normal) + vec3(1, 1, 1)) * 0.5, 1.0);    // World-space normals
-                f_color = texture(lightgridTex, v_lightgrid_uv);    // Light grid color (sort of prehistoric GI)
+
+                vec4 lightgridA = texture(lightgridTexA, v_lightgrid_uv);
+                vec4 lightgridB = texture(lightgridTexB, v_lightgrid_uv);
+                vec3 ambient = lightgridA.rgb;
+                vec3 directional = lightgridB.rgb;
+                vec3 light_dir = decode_latlng(lightgridA.w, lightgridB.w);
+                float brightness = clamp(dot(normalize(v_normal), light_dir), 0.0, 1.0);
+                f_color = vec4(ambient + brightness * directional, 1.0);    // Just the light grid factor
             }
         "
     }
@@ -246,7 +259,7 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
     let vs_uniform_buffer = CpuBufferPool::<vs::ty::Data>::new(device.clone(), BufferUsage::uniform_buffer());
 
     let sampler = Sampler::new(device.clone(), 
-        Filter::Linear, Filter::Linear, MipmapMode::Linear, 
+        Filter::Linear, Filter::Linear, MipmapMode::Linear,
         SamplerAddressMode::ClampToEdge, SamplerAddressMode::ClampToEdge, SamplerAddressMode::ClampToEdge, 
         0.0, 16.0, 0.0, 0.0).unwrap();
 
@@ -275,25 +288,7 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
     }
 
     let (dimensions, lightgrid_offset, lightgrid_scale) = world.lightgrid_dimensions();
-    let lightgrid_tex =
-    {
-        let (w, h, d) = dimensions.into();
-        let grid_size = w * h * d;
-        let mut buf = Vec::new();
-        buf.resize_with(grid_size * 4, Default::default);
-        for i in 0..grid_size
-        {
-            let light_volume = &world.light_volumes[i];
-            let _direction = light_volume.direction();
-            buf[i * 4 + 0] = light_volume.ambient[0] as f32 / 255.0;
-            buf[i * 4 + 1] = light_volume.ambient[1] as f32 / 255.0;
-            buf[i * 4 + 2] = light_volume.ambient[2] as f32 / 255.0;
-            buf[i * 4 + 3] = 1.0;
-        }
-        let (tex, future) = ImmutableImage::from_iter(buf.iter().cloned(), Dimensions::Dim3d { width: w as u32, height: h as u32, depth: d as u32 }, Format::R32G32B32A32Sfloat, queue.clone()).unwrap();
-        future.flush().unwrap();
-        tex
-    };
+    let lightgrid_textures = create_lightgrid_textures(queue.clone(), dimensions, &world.light_volumes).unwrap();
 
     // A pipeline is sort of a description of a single material: it determines which shaders to use and sets up the static rendering parameters
     // TODO create separate pipelines for planar surfaces, patches, meshes, sky
@@ -345,7 +340,8 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
                     let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
                         .add_sampled_image(texture.clone(), sampler.clone()).unwrap()   // TODO: actually load the required texture image
                         .add_sampled_image(lightmaps.get(surface.lightmap_id as usize).unwrap_or(&lightmaps[0]).clone(), sampler.clone()).unwrap()  // TODO: handle incorrect lightmap index more gracefully
-                        .add_sampled_image(lightgrid_tex.clone(), sampler.clone()).unwrap()
+                        .add_sampled_image(lightgrid_textures[0].clone(), sampler.clone()).unwrap()
+                        .add_sampled_image(lightgrid_textures[1].clone(), sampler.clone()).unwrap()
                         .build().unwrap()
                     );
 
@@ -391,7 +387,8 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
                     let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
                         .add_sampled_image(texture.clone(), sampler.clone()).unwrap()   // TODO: actually load the required texture image
                         .add_sampled_image(lightmaps.get(surface.lightmap_id as usize).unwrap_or(&lightmaps[0]).clone(), sampler.clone()).unwrap()  // TODO: handle incorrect lightmap index more gracefully
-                        .add_sampled_image(lightgrid_tex.clone(), sampler.clone()).unwrap()
+                        .add_sampled_image(lightgrid_textures[0].clone(), sampler.clone()).unwrap()
+                        .add_sampled_image(lightgrid_textures[1].clone(), sampler.clone()).unwrap()
                         .build().unwrap()
                     );
 
@@ -422,6 +419,38 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
         lightgrid_scale: lightgrid_scale,
         surface_renderers: surface_renderers,
     }
+}
+
+fn create_lightgrid_textures(queue: Arc<Queue>, dimensions: cgmath::Vector3::<usize>, light_volumes: &Vec<bsp::LightVolume>) -> Result<Vec<Arc<dyn ImageViewAccess + Send + Sync>>, ImageCreationError>
+{
+    let (w, h, d) = dimensions.into();
+    let grid_size = w * h * d;
+    let mut buf = Vec::new();
+    buf.resize_with(grid_size * 4, Default::default);
+
+    for i in 0..grid_size
+    {
+        let light_volume = &light_volumes[i];
+        buf[i * 4 + 0] = light_volume.ambient[0];
+        buf[i * 4 + 1] = light_volume.ambient[1];
+        buf[i * 4 + 2] = light_volume.ambient[2];
+        buf[i * 4 + 3] = light_volume.direction[1];
+    }
+    let (tex_a, future) = ImmutableImage::from_iter(buf.iter().cloned(), Dimensions::Dim3d { width: w as u32, height: h as u32, depth: d as u32 }, Format::R8G8B8A8Unorm, queue.clone())?;
+    future.flush().unwrap();
+
+    for i in 0..grid_size
+    {
+        let light_volume = &light_volumes[i];
+        buf[i * 4 + 0] = light_volume.directional[0];
+        buf[i * 4 + 1] = light_volume.directional[1];
+        buf[i * 4 + 2] = light_volume.directional[2];
+        buf[i * 4 + 3] = light_volume.direction[0];
+    }
+    let (tex_b, future) = ImmutableImage::from_iter(buf.iter().cloned(), Dimensions::Dim3d { width: w as u32, height: h as u32, depth: d as u32 }, Format::R8G8B8A8Unorm, queue.clone())?;
+    future.flush().unwrap();
+
+    Ok(vec!(tex_a, tex_b))
 }
 
 impl vkcore::RendererAbstract for BspRenderer

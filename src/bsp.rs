@@ -277,16 +277,25 @@ pub struct LightVolume
 {
     pub ambient: [u8; 3],
     pub directional: [u8; 3],
-    pub direction: [u8; 2],
+    pub direction: [u8; 2], // Longitude and latitude, in that order
 }
 
 impl LightVolume
 {
+    pub fn latitude(&self) -> f32
+    {
+        (self.direction[1] as f32 / 255.0) * std::f32::consts::FRAC_2_PI
+    }
+
+    pub fn longitude(&self) -> f32
+    {
+        (self.direction[0] as f32 / 255.0) * std::f32::consts::FRAC_2_PI
+    }
+
     pub fn direction(&self) -> Vector3::<f32>
     {
-        // Latitude and longitude are stored in reverse order
-        let lat = (self.direction[1] as f32 / 255.0) * std::f32::consts::FRAC_2_PI;
-        let lng = (self.direction[0] as f32 / 255.0) * std::f32::consts::FRAC_2_PI;
+        let lat = self.latitude();
+        let lng = self.longitude();
 
         Vector3::new(
             lat.cos() * lng.sin(),
