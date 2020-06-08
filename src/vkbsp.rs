@@ -142,7 +142,7 @@ mod tes {
     }
 }
 
-mod fs {
+mod world_fs {
     vulkano_shaders::shader!{
         ty: "fragment",
         src: "#version 450
@@ -155,8 +155,32 @@ mod fs {
 
             layout(set = 1, binding = 0) uniform sampler2D mainTex;
             layout(set = 1, binding = 1) uniform sampler2D lightmapTex;
-            layout(set = 1, binding = 2) uniform sampler3D lightgridTexA;
-            layout(set = 1, binding = 3) uniform sampler3D lightgridTexB;
+
+            void main() {
+                vec4 texColor = texture(mainTex, v_tex_uv);
+                vec4 lightmapColor = texture(lightmapTex, v_lightmap_uv);
+
+                f_color = lightmapColor;   // Just the lightmap
+                //f_color = vec4((normalize(v_normal) + vec3(1, 1, 1)) * 0.5, 1.0);    // World-space normals
+            }
+        "
+    }
+}
+
+mod model_fs {
+    vulkano_shaders::shader!{
+        ty: "fragment",
+        src: "#version 450
+            layout(location = 0) in vec3 v_normal;
+            layout(location = 1) in vec2 v_tex_uv;
+            layout(location = 2) in vec2 v_lightmap_uv;
+            layout(location = 3) in vec3 v_lightgrid_uv;
+
+            layout(location = 0) out vec4 f_color;
+
+            layout(set = 1, binding = 0) uniform sampler2D mainTex;
+            layout(set = 1, binding = 1) uniform sampler3D lightgridTexA;
+            layout(set = 1, binding = 2) uniform sampler3D lightgridTexB;
 
             vec3 decode_latlng(float lat, float lng)
             {
@@ -165,10 +189,6 @@ mod fs {
 
             void main() {
                 vec4 texColor = texture(mainTex, v_tex_uv);
-                vec4 lightmapColor = texture(lightmapTex, v_lightmap_uv);
-
-                //f_color = lightmapColor;   // Just the lightmap
-                //f_color = vec4((normalize(v_normal) + vec3(1, 1, 1)) * 0.5, 1.0);    // World-space normals
 
                 vec4 lightgridA = texture(lightgridTexA, v_lightgrid_uv);
                 vec4 lightgridB = texture(lightgridTexB, v_lightgrid_uv);
@@ -233,6 +253,8 @@ struct PatchSurfaceRenderer
     descriptor_set: Arc<dyn DescriptorSet + Sync + Send>,
 }
 
+type MeshSurfaceRenderer = PlanarSurfaceRenderer;   // At the moment these two work identically, but conceptually I'd like to keep them distinct
+
 // We actually might want to pull the renderpass and framebuffer creation into here as well, to allow more flexibility in what and how we render. That's something for later though.
 pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderPassAbstract + Send + Sync>, world: bsp::World) -> impl vkcore::RendererAbstract
 {
@@ -254,7 +276,8 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
     let vs = vs::Shader::load(device.clone()).unwrap();
     let tcs = tcs::Shader::load(device.clone()).unwrap();
     let tes = tes::Shader::load(device.clone()).unwrap();
-    let fs = fs::Shader::load(device.clone()).unwrap();
+    let world_fs = world_fs::Shader::load(device.clone()).unwrap();
+    let model_fs = model_fs::Shader::load(device.clone()).unwrap();
 
     let vs_uniform_buffer = CpuBufferPool::<vs::ty::Data>::new(device.clone(), BufferUsage::uniform_buffer());
 
@@ -299,7 +322,7 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
         //.polygon_mode_line()
         .cull_mode_front()
         .viewports_dynamic_scissors_irrelevant(1)
-        .fragment_shader(fs.main_entry_point(), ())
+        .fragment_shader(world_fs.main_entry_point(), ())
         .depth_stencil_simple_depth()
         .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
         .build(device.clone())
@@ -313,7 +336,20 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
         //.polygon_mode_line()
         .cull_mode_front()
         .viewports_dynamic_scissors_irrelevant(1)
-        .fragment_shader(fs.main_entry_point(), ())
+        .fragment_shader(world_fs.main_entry_point(), ())
+        .depth_stencil_simple_depth()
+        .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
+        .build(device.clone())
+        .unwrap());
+
+    let model_pipeline = Arc::new(GraphicsPipeline::start()
+        .vertex_input_single_buffer::<bsp::Vertex>()
+        .vertex_shader(vs.main_entry_point(), ())
+        .triangle_list()
+        //.polygon_mode_line()
+        .cull_mode_front()
+        .viewports_dynamic_scissors_irrelevant(1)
+        .fragment_shader(model_fs.main_entry_point(), ())
         .depth_stencil_simple_depth()
         .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
         .build(device.clone())
@@ -326,22 +362,19 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
         let end_vert = start_vert + surface.num_vertices as usize;
         let start_index = surface.first_index as usize;
         let end_index = start_index + surface.num_indices as usize;
+        let vertex_slice = Arc::new(BufferSlice::from_typed_buffer_access(vertex_buffer.clone()).slice(start_vert .. end_vert).unwrap());
+        let index_slice = Arc::new(BufferSlice::from_typed_buffer_access(index_buffer.clone()).slice(start_index .. end_index).unwrap());
 
         surface_renderers.push(
         { 
             match surface.surface_type
             {
-                bsp::SurfaceType::Planar | bsp::SurfaceType::Mesh =>
+                bsp::SurfaceType::Planar =>
                 {
-                    let vertex_slice = Arc::new(BufferSlice::from_typed_buffer_access(vertex_buffer.clone()).slice(start_vert .. end_vert).unwrap());
-                    let index_slice = Arc::new(BufferSlice::from_typed_buffer_access(index_buffer.clone()).slice(start_index .. end_index).unwrap());
-
                     let layout = pipeline.descriptor_set_layout(1).unwrap();
                     let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
                         .add_sampled_image(texture.clone(), sampler.clone()).unwrap()   // TODO: actually load the required texture image
                         .add_sampled_image(lightmaps.get(surface.lightmap_id as usize).unwrap_or(&lightmaps[0]).clone(), sampler.clone()).unwrap()  // TODO: handle incorrect lightmap index more gracefully
-                        .add_sampled_image(lightgrid_textures[0].clone(), sampler.clone()).unwrap()
-                        .add_sampled_image(lightgrid_textures[1].clone(), sampler.clone()).unwrap()
                         .build().unwrap()
                     );
 
@@ -355,8 +388,6 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
                 },
                 bsp::SurfaceType::Patch =>
                 {
-                    let vertex_slice = Arc::new(BufferSlice::from_typed_buffer_access(vertex_buffer.clone()).slice(start_vert .. end_vert).unwrap());
-
                     // The vertex buffer from the BSP created above has all the vertices tightly packed with minimal duplication.
                     // Vulkan's tessellation pipeline expects each patch to have a full set of 9 control points, so we have to generate an index list here to provide all of the control points in the right order.
                     let index_buffer =
@@ -387,8 +418,6 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
                     let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
                         .add_sampled_image(texture.clone(), sampler.clone()).unwrap()   // TODO: actually load the required texture image
                         .add_sampled_image(lightmaps.get(surface.lightmap_id as usize).unwrap_or(&lightmaps[0]).clone(), sampler.clone()).unwrap()  // TODO: handle incorrect lightmap index more gracefully
-                        .add_sampled_image(lightgrid_textures[0].clone(), sampler.clone()).unwrap()
-                        .add_sampled_image(lightgrid_textures[1].clone(), sampler.clone()).unwrap()
                         .build().unwrap()
                     );
 
@@ -397,6 +426,24 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
                         pipeline: patch_pipeline.clone(),
                         vertex_slice: vertex_slice.clone(),
                         index_buffer: index_buffer.clone(),
+                        descriptor_set: descriptor_set.clone(),
+                    })
+                },
+                bsp::SurfaceType::Mesh =>
+                {
+                    let layout = model_pipeline.descriptor_set_layout(1).unwrap();
+                    let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
+                        .add_sampled_image(texture.clone(), sampler.clone()).unwrap()   // TODO: actually load the required texture image
+                        .add_sampled_image(lightgrid_textures[0].clone(), sampler.clone()).unwrap()
+                        .add_sampled_image(lightgrid_textures[1].clone(), sampler.clone()).unwrap()
+                        .build().unwrap()
+                    );
+
+                    Box::new(MeshSurfaceRenderer
+                    {
+                        pipeline: model_pipeline.clone(),
+                        vertex_slice: vertex_slice.clone(),
+                        index_slice: index_slice.clone(),
                         descriptor_set: descriptor_set.clone(),
                     })
                 },
