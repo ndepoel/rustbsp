@@ -184,7 +184,7 @@ mod model_fs {
 
             vec3 decode_latlng(float lat, float lng)
             {
-                return normalize(vec3(cos(lat) * sin(lng), sin(lat) * sin(lng), cos(lng)));
+                return vec3(cos(lat) * sin(lng), sin(lat) * sin(lng), cos(lng));
             }
 
             void main() {
