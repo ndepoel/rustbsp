@@ -284,10 +284,15 @@ impl LightVolume
 {
     pub fn direction(&self) -> Vector3::<f32>
     {
-        let phi = (self.direction[0] - 128) as f32 / 256.0 * 180.0;
-        let theta = self.direction[1] as f32 / 256.0 * 360.0;
+        // Latitude and longitude are stored in reverse order
+        let lat = (self.direction[1] as f32 / 255.0) * std::f32::consts::FRAC_2_PI;
+        let lng = (self.direction[0] as f32 / 255.0) * std::f32::consts::FRAC_2_PI;
 
-        Vector3::new(theta.sin() * phi.cos(), theta.cos() * phi.cos(), phi.sin()).normalize()
+        Vector3::new(
+            lat.cos() * lng.sin(),
+            lat.sin() * lng.sin(),
+            lng.cos()
+        ).normalize()
     }
 }
 
