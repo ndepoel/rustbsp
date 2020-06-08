@@ -37,7 +37,8 @@ mod vs {
 
             layout(location = 0) out vec3 v_normal;
             layout(location = 1) out vec2 v_tex_uv;
-            layout(location = 2) out vec2 v_light_uv;
+            layout(location = 2) out vec2 v_lightmap_uv;
+            layout(location = 3) out vec3 v_lightgrid_uv;
 
             layout(set = 0, binding = 0) uniform Data {
                 mat4 model;
@@ -48,9 +49,10 @@ mod vs {
             void main() {
                 mat4 modelview = uniforms.view * uniforms.model;
                 gl_Position = uniforms.proj * modelview * vec4(position, 1.0);
+                v_normal = transpose(inverse(mat3(uniforms.model))) * normal;   // World-space normal
                 v_tex_uv = texture_coord;
-                v_light_uv = lightmap_coord;
-                v_normal = transpose(inverse(mat3(modelview))) * normal;
+                v_lightmap_uv = lightmap_coord;
+                v_lightgrid_uv = (uniforms.model * vec4(position, 1.0)).xyz;  // TODO: + offset * scale
             }
         "
     }
@@ -64,17 +66,20 @@ mod tcs {
 
             layout(location = 0) in vec3 v_normal[];
             layout(location = 1) in vec2 v_tex_uv[];
-            layout(location = 2) in vec2 v_light_uv[];
+            layout(location = 2) in vec2 v_lightmap_uv[];
+            layout(location = 3) in vec3 v_lightgrid_uv[];
 
             layout(location = 0) out vec3 tc_normal[];
             layout(location = 1) out vec2 tc_tex_uv[];
-            layout(location = 2) out vec2 tc_light_uv[];
+            layout(location = 2) out vec2 tc_lightmap_uv[];
+            layout(location = 3) out vec3 tc_lightgrid_uv[];
 
             void main() {
                 gl_out[gl_InvocationID].gl_Position = gl_in[gl_InvocationID].gl_Position;
                 tc_normal[gl_InvocationID] = v_normal[gl_InvocationID];
                 tc_tex_uv[gl_InvocationID] = v_tex_uv[gl_InvocationID];
-                tc_light_uv[gl_InvocationID] = v_light_uv[gl_InvocationID];
+                tc_lightmap_uv[gl_InvocationID] = v_lightmap_uv[gl_InvocationID];
+                tc_lightgrid_uv[gl_InvocationID] = v_lightgrid_uv[gl_InvocationID];
 
                 gl_TessLevelInner[0] = 20;
                 gl_TessLevelInner[1] = 20;
@@ -97,17 +102,20 @@ mod tes {
 
             layout(location = 0) in vec3 tc_normal[];
             layout(location = 1) in vec2 tc_tex_uv[];
-            layout(location = 2) in vec2 tc_light_uv[];
+            layout(location = 2) in vec2 tc_lightmap_uv[];
+            layout(location = 3) in vec3 tc_lightgrid_uv[];
         
             layout(location = 0) out vec3 te_normal;
             layout(location = 1) out vec2 te_tex_uv;
-            layout(location = 2) out vec2 te_light_uv;
+            layout(location = 2) out vec2 te_lightmap_uv;
+            layout(location = 3) out vec3 te_lightgrid_uv;
 
             void main() {
                 gl_Position = vec4(0, 0, 0, 0);
                 te_normal = vec3(0, 0, 0);
                 te_tex_uv = vec2(0, 0);
-                te_light_uv = vec2(0, 0);
+                te_lightmap_uv = vec2(0, 0);
+                te_lightgrid_uv = vec3(0, 0, 0);
 
                 vec2 tmp = 1.0 - gl_TessCoord.xy;
                 vec3 bx = vec3(tmp.x * tmp.x, 2 * gl_TessCoord.x * tmp.x, gl_TessCoord.x * gl_TessCoord.x);
@@ -123,7 +131,8 @@ mod tes {
                         gl_Position += gl_in[n].gl_Position * b;
                         te_normal += tc_normal[n] * b;
                         te_tex_uv += tc_tex_uv[n] * b;
-                        te_light_uv += tc_light_uv[n] * b;
+                        te_lightmap_uv += tc_lightmap_uv[n] * b;
+                        te_lightgrid_uv += tc_lightgrid_uv[n] * b;
                     }
                 }
             }
@@ -137,19 +146,20 @@ mod fs {
         src: "#version 450
             layout(location = 0) in vec3 v_normal;
             layout(location = 1) in vec2 v_tex_uv;
-            layout(location = 2) in vec2 v_light_uv;
+            layout(location = 2) in vec2 v_lightmap_uv;
+            layout(location = 3) in vec3 v_lightgrid_uv;
 
             layout(location = 0) out vec4 f_color;
 
             layout(set = 1, binding = 0) uniform sampler2D mainTex;
-            layout(set = 1, binding = 1) uniform sampler2D lightTex;
+            layout(set = 1, binding = 1) uniform sampler2D lightmapTex;
 
             void main() {
                 vec4 texColor = texture(mainTex, v_tex_uv);
-                vec4 lightColor = texture(lightTex, v_light_uv);
+                vec4 lightmapColor = texture(lightmapTex, v_lightmap_uv);
 
-                f_color = lightColor;   // Just the lightmap
-                //f_color = vec4((v_normal + vec3(1, 1, 1)) * 0.5, 1.0);    // View-space normals
+                f_color = lightmapColor;   // Just the lightmap
+                //f_color = vec4((normalize(v_normal) + vec3(1, 1, 1)) * 0.5, 1.0);    // World-space normals
             }
         "
     }
