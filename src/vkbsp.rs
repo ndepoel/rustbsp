@@ -275,7 +275,6 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
     }
 
     let (dimensions, lightgrid_offset, lightgrid_scale) = world.lightgrid_dimensions();
-    println!("Lightgrid dimensions = {:?}, offset = {:?}, scale = {:?}", dimensions, lightgrid_offset, lightgrid_scale);
     let lightgrid_tex =
     {
         let (w, h, d) = dimensions.into();
@@ -285,12 +284,13 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
         for i in 0..grid_size
         {
             let light_volume = &world.light_volumes[i];
-            buf[i * 4 + 0] = light_volume.ambient[0];
-            buf[i * 4 + 1] = light_volume.ambient[1];
-            buf[i * 4 + 2] = light_volume.ambient[2];
-            buf[i * 4 + 3] = 255;
+            let _direction = light_volume.direction();
+            buf[i * 4 + 0] = light_volume.ambient[0] as f32 / 255.0;
+            buf[i * 4 + 1] = light_volume.ambient[1] as f32 / 255.0;
+            buf[i * 4 + 2] = light_volume.ambient[2] as f32 / 255.0;
+            buf[i * 4 + 3] = 1.0;
         }
-        let (tex, future) = ImmutableImage::from_iter(buf.iter().cloned(), Dimensions::Dim3d { width: w as u32, height: h as u32, depth: d as u32 }, Format::R8G8B8A8Unorm, queue.clone()).unwrap();
+        let (tex, future) = ImmutableImage::from_iter(buf.iter().cloned(), Dimensions::Dim3d { width: w as u32, height: h as u32, depth: d as u32 }, Format::R32G32B32A32Sfloat, queue.clone()).unwrap();
         future.flush().unwrap();
         tex
     };

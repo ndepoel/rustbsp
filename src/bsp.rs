@@ -7,6 +7,7 @@ use std::fmt;
 use std::cmp;
 
 use cgmath::{Vector2, Vector3};
+use cgmath::prelude::*;
 
 // Enums in Rust are integer-counted by default like most other languages, starting at 0
 enum LumpType
@@ -277,6 +278,17 @@ pub struct LightVolume
     pub ambient: [u8; 3],
     pub directional: [u8; 3],
     pub direction: [u8; 2],
+}
+
+impl LightVolume
+{
+    pub fn direction(&self) -> Vector3::<f32>
+    {
+        let phi = (self.direction[0] - 128) as f32 / 256.0 * 180.0;
+        let theta = self.direction[1] as f32 / 256.0 * 360.0;
+
+        Vector3::new(theta.sin() * phi.cos(), theta.cos() * phi.cos(), phi.sin()).normalize()
+    }
 }
 
 #[derive(Default)]  // This allows us to create an empty instance without having to initialize all the fields manually.
