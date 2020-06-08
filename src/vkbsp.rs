@@ -163,7 +163,7 @@ mod world_fs {
 
                 //f_color = lightmapColor;   // Just the lightmap
                 //f_color = vec4((normalize(v_normal) + vec3(1, 1, 1)) * 0.5, 1.0);    // World-space normals
-                f_color = texColor * lightmapColor;
+                f_color = texColor * (0.1 + lightmapColor);
             }
         "
     }
@@ -201,7 +201,7 @@ mod model_fs {
                 vec4 lighting = vec4(ambient + brightness * directional, 1.0);
                 //f_color = vec4(lighting, 1.0);    // Just the light grid factor
 
-                f_color = texColor * lighting;
+                f_color = texColor * (0.1 + lighting);
             }
         "
     }
@@ -494,7 +494,8 @@ pub fn load_texture(queue: Arc<Queue>, tex_name: &str) -> Result<Arc<dyn ImageVi
     }
     else
     {
-        let placeholder = [0u8, 0u8, 0u8, 1u8];
+        println!("Could not load texture: {}", tex_name);
+        let placeholder = [255u8, 255u8, 255u8, 255u8];
         ImmutableImage::from_iter(placeholder.iter().cloned(), Dimensions::Dim2d { width: 1, height: 1 }, Format::R8G8B8A8Unorm, queue.clone())?
     };
 
