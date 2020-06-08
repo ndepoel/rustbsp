@@ -2,3 +2,7 @@
 *.raw
 lightmap-*.png
 *.bsp
+env/
+gfx/
+models/
+textures/

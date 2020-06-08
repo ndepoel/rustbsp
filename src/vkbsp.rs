@@ -18,6 +18,7 @@ use image::{ ImageBuffer, Rgb, Pixel };
 
 use std::sync::Arc;
 use std::ops::Deref;
+use std::path::PathBuf;
 
 use cgmath::prelude::*;
 
@@ -160,8 +161,9 @@ mod world_fs {
                 vec4 texColor = texture(mainTex, v_tex_uv);
                 vec4 lightmapColor = texture(lightmapTex, v_lightmap_uv);
 
-                f_color = lightmapColor;   // Just the lightmap
+                //f_color = lightmapColor;   // Just the lightmap
                 //f_color = vec4((normalize(v_normal) + vec3(1, 1, 1)) * 0.5, 1.0);    // World-space normals
+                f_color = texColor * lightmapColor;
             }
         "
     }
@@ -196,7 +198,10 @@ mod model_fs {
                 vec3 directional = lightgridB.rgb;
                 vec3 light_dir = decode_latlng(lightgridA.w, lightgridB.w);
                 float brightness = clamp(dot(normalize(v_normal), light_dir), 0.0, 1.0);
-                f_color = vec4(ambient + brightness * directional, 1.0);    // Just the light grid factor
+                vec4 lighting = vec4(ambient + brightness * directional, 1.0);
+                //f_color = vec4(lighting, 1.0);    // Just the light grid factor
+
+                f_color = texColor * lighting;
             }
         "
     }
@@ -283,17 +288,15 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
 
     let sampler = Sampler::new(device.clone(), 
         Filter::Linear, Filter::Linear, MipmapMode::Linear,
-        SamplerAddressMode::ClampToEdge, SamplerAddressMode::ClampToEdge, SamplerAddressMode::ClampToEdge, 
+        SamplerAddressMode::Repeat, SamplerAddressMode::Repeat, SamplerAddressMode::Repeat,
         0.0, 16.0, 0.0, 0.0).unwrap();
 
-    let texture =
+    let fallback_tex = load_texture(queue.clone(), "image_img.png").unwrap();
+    let mut textures = Vec::<Arc<dyn ImageViewAccess + Send + Sync>>::with_capacity(world.textures.len());
+    for texture in &world.textures
     {
-        let img = image::open("image_img.png").unwrap().into_rgba();
-        let (w, h) = img.dimensions();
-        let (tex, future) = ImmutableImage::from_iter(img.into_raw().iter().cloned(), Dimensions::Dim2d { width: w, height: h }, Format::R8G8B8A8Srgb, queue.clone()).unwrap();
-        future.flush().unwrap();
-        tex
-    };
+        textures.push(load_texture(queue.clone(), texture.name()).unwrap());
+    }
 
     let mut lightmaps = Vec::<Arc<dyn ImageViewAccess + Send + Sync>>::with_capacity(world.lightmaps.len());
     for lightmap in &world.lightmaps
@@ -373,7 +376,7 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
                 {
                     let layout = pipeline.descriptor_set_layout(1).unwrap();
                     let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
-                        .add_sampled_image(texture.clone(), sampler.clone()).unwrap()   // TODO: actually load the required texture image
+                        .add_sampled_image(textures.get(surface.texture_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
                         .add_sampled_image(lightmaps.get(surface.lightmap_id as usize).unwrap_or(&lightmaps[0]).clone(), sampler.clone()).unwrap()  // TODO: handle incorrect lightmap index more gracefully
                         .build().unwrap()
                     );
@@ -416,7 +419,7 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
 
                     let layout = patch_pipeline.descriptor_set_layout(1).unwrap();
                     let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
-                        .add_sampled_image(texture.clone(), sampler.clone()).unwrap()   // TODO: actually load the required texture image
+                        .add_sampled_image(textures.get(surface.texture_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
                         .add_sampled_image(lightmaps.get(surface.lightmap_id as usize).unwrap_or(&lightmaps[0]).clone(), sampler.clone()).unwrap()  // TODO: handle incorrect lightmap index more gracefully
                         .build().unwrap()
                     );
@@ -433,7 +436,7 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
                 {
                     let layout = model_pipeline.descriptor_set_layout(1).unwrap();
                     let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
-                        .add_sampled_image(texture.clone(), sampler.clone()).unwrap()   // TODO: actually load the required texture image
+                        .add_sampled_image(textures.get(surface.texture_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
                         .add_sampled_image(lightgrid_textures[0].clone(), sampler.clone()).unwrap()
                         .add_sampled_image(lightgrid_textures[1].clone(), sampler.clone()).unwrap()
                         .build().unwrap()
@@ -460,12 +463,43 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
         vertex_buffer: vertex_buffer.clone(), index_buffer: index_buffer.clone(),
         vs_uniform_buffer: Arc::new(vs_uniform_buffer),
         sampler: sampler.clone(),
-        texture: Arc::new(texture),
+        texture: Arc::new(fallback_tex),
         lightmaps: lightmaps,
         lightgrid_offset: lightgrid_offset,
         lightgrid_scale: lightgrid_scale,
         surface_renderers: surface_renderers,
     }
+}
+
+pub fn load_texture(queue: Arc<Queue>, tex_name: &str) -> Result<Arc<dyn ImageViewAccess + Send + Sync>, ImageCreationError>
+{
+    let extensions = vec!("", "tga", "jpg", "png");
+
+    let mut file_path = PathBuf::from(tex_name);
+    for ext in extensions.iter()
+    {
+        file_path = file_path.with_extension(ext);
+        if file_path.is_file()
+        {
+            break;
+        }
+    }
+
+    let (tex, future) = if file_path.is_file()
+    {
+        println!("Loading texture from file: {}", file_path.to_string_lossy());
+        let img = image::open(file_path.to_str().unwrap()).unwrap().into_rgba();
+        let (w, h) = img.dimensions();
+        ImmutableImage::from_iter(img.into_raw().iter().cloned(), Dimensions::Dim2d { width: w, height: h }, Format::R8G8B8A8Unorm, queue.clone())?
+    }
+    else
+    {
+        let placeholder = [0u8, 0u8, 0u8, 1u8];
+        ImmutableImage::from_iter(placeholder.iter().cloned(), Dimensions::Dim2d { width: 1, height: 1 }, Format::R8G8B8A8Unorm, queue.clone())?
+    };
+
+    future.flush().unwrap();
+    Ok(tex)
 }
 
 fn create_lightgrid_textures(queue: Arc<Queue>, dimensions: cgmath::Vector3::<usize>, light_volumes: &Vec<bsp::LightVolume>) -> Result<Vec<Arc<dyn ImageViewAccess + Send + Sync>>, ImageCreationError>
