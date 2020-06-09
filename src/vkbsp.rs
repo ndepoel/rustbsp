@@ -163,7 +163,7 @@ mod world_fs {
 
                 //f_color = lightmapColor;   // Just the lightmap
                 //f_color = vec4((normalize(v_normal) + vec3(1, 1, 1)) * 0.5, 1.0);    // World-space normals
-                f_color = texColor * (0.1 + lightmapColor);
+                f_color = texColor + lightmapColor - 0.33;
             }
         "
     }
@@ -201,7 +201,7 @@ mod model_fs {
                 vec4 lighting = vec4(ambient + brightness * directional, 1.0);
                 //f_color = vec4(lighting, 1.0);    // Just the light grid factor
 
-                f_color = texColor * (0.1 + lighting);
+                f_color = texColor + lighting - 0.33;
             }
         "
     }
