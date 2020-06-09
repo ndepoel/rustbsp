@@ -18,6 +18,11 @@ impl Entity
     {
         Self { class_name: String::default(), origin: Vector3::<f32>::zero(), angle: f32::default(), properties: HashMap::<String, String>::default() }
     }
+
+    pub fn get_vector(&self, prop_name: &str) -> Option<Vector3::<f32>>
+    {
+        self.properties.get(prop_name).and_then(|p| Some(parse_vector(p)))
+    }
 }
 
 fn next_token(chars: &mut Chars<'_>) -> Option<String>

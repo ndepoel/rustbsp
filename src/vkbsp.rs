@@ -489,6 +489,9 @@ pub fn load_texture(queue: Arc<Queue>, tex_name: &str) -> Result<Arc<dyn ImageVi
     {
         println!("Loading texture from file: {}", file_path.to_string_lossy());
         let img = image::open(file_path.to_str().unwrap()).unwrap().into_rgba();
+        // let (w, h) = img.dimensions();
+        // let img = image::imageops::resize(&img, w * 4, h * 4, image::imageops::FilterType::Lanczos3);
+        // let img = image::imageops::unsharpen(&img, 0.7, 2);
         let (w, h) = img.dimensions();
         ImmutableImage::from_iter(img.into_raw().iter().cloned(), Dimensions::Dim2d { width: w, height: h }, Format::R8G8B8A8Unorm, queue.clone())?
     }
@@ -541,7 +544,7 @@ fn create_lightgrid_textures(queue: Arc<Queue>, dimensions: cgmath::Vector3::<us
 // which is why the proper Quake 3 look was so hard to replicate before.
 fn color_shift_lighting(bytes: [u8; 3]) -> [u8; 3]
 {
-    let shift = 1;  // You can tweak this to make the lighting brighter or darker, but 1 seems to be the default
+    let shift = 2;  // You can tweak this to make the lighting appear brighter or darker, but 2 seems to be the default
     let mut r = (bytes[0] as u32) << shift;
     let mut g = (bytes[1] as u32) << shift;
     let mut b = (bytes[2] as u32) << shift;
@@ -683,9 +686,9 @@ impl BspRenderer
 
             let surface = &self.world.surfaces[surface_index];
             let texture = &self.world.textures[surface.texture_id as usize];
-            if texture.surface_flags.contains(bsp::SurfaceFlags::SKY)
+            if texture.surface_flags.contains(bsp::SurfaceFlags::SKY) || texture.surface_flags.contains(bsp::SurfaceFlags::NODRAW)
             {
-                // Patch surfaces will be rendered separately (using tessellation shaders) and sky surfaces require a different set of shaders. Meshes don't use lightmaps so would also require a different shader.
+                // TODO: Sky surfaces require a different set of shaders
                 continue;
             }
 
