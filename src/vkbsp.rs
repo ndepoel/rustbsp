@@ -163,7 +163,7 @@ mod world_fs {
 
                 //f_color = lightmapColor;   // Just the lightmap
                 //f_color = vec4((normalize(v_normal) + vec3(1, 1, 1)) * 0.5, 1.0);    // World-space normals
-                f_color = texColor + lightmapColor - 0.33;
+                f_color = texColor * lightmapColor;
             }
         "
     }
@@ -201,7 +201,7 @@ mod model_fs {
                 vec4 lighting = vec4(ambient + brightness * directional, 1.0);
                 //f_color = vec4(lighting, 1.0);    // Just the light grid factor
 
-                f_color = texColor + lighting - 0.33;
+                f_color = texColor * lighting;
             }
         "
     }
@@ -302,7 +302,7 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
     for lightmap in &world.lightmaps
     {
         lightmaps.push({
-            let img = ImageBuffer::from_fn(bsp::LIGHTMAP_WIDTH as u32, bsp::LIGHTMAP_HEIGHT as u32, |x,y| { Rgb(lightmap.image[y as usize][x as usize]).to_rgba() });
+            let img = ImageBuffer::from_fn(bsp::LIGHTMAP_WIDTH as u32, bsp::LIGHTMAP_HEIGHT as u32, |x,y| { Rgb(color_shift_lighting(lightmap.image[y as usize][x as usize])).to_rgba() });
             // Perform some image processing to clean up the lightmaps and make them look a bit sharper
             // let img = image::imageops::resize(&img, bsp::LIGHTMAP_WIDTH as u32 * 4, bsp::LIGHTMAP_HEIGHT as u32 * 4, image::imageops::FilterType::Gaussian);
             // let img = image::imageops::unsharpen(&img, 0.7, 2);
@@ -513,9 +513,10 @@ fn create_lightgrid_textures(queue: Arc<Queue>, dimensions: cgmath::Vector3::<us
     for i in 0..grid_size
     {
         let light_volume = &light_volumes[i];
-        buf[i * 4 + 0] = light_volume.ambient[0];
-        buf[i * 4 + 1] = light_volume.ambient[1];
-        buf[i * 4 + 2] = light_volume.ambient[2];
+        let ambient = color_shift_lighting(light_volume.ambient);
+        buf[i * 4 + 0] = ambient[0];
+        buf[i * 4 + 1] = ambient[1];
+        buf[i * 4 + 2] = ambient[2];
         buf[i * 4 + 3] = light_volume.direction[1];
     }
     let (tex_a, future) = ImmutableImage::from_iter(buf.iter().cloned(), Dimensions::Dim3d { width: w as u32, height: h as u32, depth: d as u32 }, Format::R8G8B8A8Unorm, queue.clone())?;
@@ -524,15 +525,38 @@ fn create_lightgrid_textures(queue: Arc<Queue>, dimensions: cgmath::Vector3::<us
     for i in 0..grid_size
     {
         let light_volume = &light_volumes[i];
-        buf[i * 4 + 0] = light_volume.directional[0];
-        buf[i * 4 + 1] = light_volume.directional[1];
-        buf[i * 4 + 2] = light_volume.directional[2];
+        let directional = color_shift_lighting(light_volume.directional);
+        buf[i * 4 + 0] = directional[0];
+        buf[i * 4 + 1] = directional[1];
+        buf[i * 4 + 2] = directional[2];
         buf[i * 4 + 3] = light_volume.direction[0];
     }
     let (tex_b, future) = ImmutableImage::from_iter(buf.iter().cloned(), Dimensions::Dim3d { width: w as u32, height: h as u32, depth: d as u32 }, Format::R8G8B8A8Unorm, queue.clone())?;
     future.flush().unwrap();
 
     Ok(vec!(tex_a, tex_b))
+}
+
+// This code is converted from the Quake 3 source. Turns out they *do* process the lighting data before loading it into textures,
+// which is why the proper Quake 3 look was so hard to replicate before.
+fn color_shift_lighting(bytes: [u8; 3]) -> [u8; 3]
+{
+    let shift = 1;  // You can tweak this to make the lighting brighter or darker, but 1 seems to be the default
+    let mut r = (bytes[0] as u32) << shift;
+    let mut g = (bytes[1] as u32) << shift;
+    let mut b = (bytes[2] as u32) << shift;
+
+    // Normalize by color instead of saturating to white
+    if (r | g | b) > 255
+    {
+        let max = if r > g { r } else { g };
+        let max = if max > b { max } else { b };
+        r = r * 255 / max;
+        g = g * 255 / max;
+        b = b * 255 / max;
+    }
+
+    [r as u8, g as u8, b as u8]
 }
 
 impl vkcore::RendererAbstract for BspRenderer
