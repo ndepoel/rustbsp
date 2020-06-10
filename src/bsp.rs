@@ -420,6 +420,7 @@ impl World
     pub fn cluster_visible(&self, cluster: i32, test: i32) -> bool
     {
         if cluster < 0 { return true; } // If we're outside the map, everything will be considered visible
+        if test < 0 { return false; }   // Leafs outside the map need not be rendered
 
         // PVS data contains cross-references between all leafs, tightly packed into bit strings.
         // To decode it requires some nasty wrangling with bitwire operators that I'm not going to bother trying to understand right now.
