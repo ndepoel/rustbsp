@@ -228,7 +228,7 @@ struct BspRenderer
 
 trait SurfaceRenderer
 {
-    fn draw_surface(&self, builder: AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>) -> AutoCommandBufferBuilder;
+    fn draw_surface(&self, builder: &mut AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>);
 }
 
 struct NoopSurfaceRenderer
@@ -600,13 +600,13 @@ impl vkcore::RendererAbstract for BspRenderer
         // The command buffer contains the instructions to be executed to render things specifically for this frame:
         // a single draw call contains the pipeline (i.e. material) to use, the vertex buffer (and indices) to use, and the dynamic rendering parameters to be passed to the shaders.
         let clear_values = vec!([0.1921, 0.3019, 0.4745, 1.0].into(), 1f32.into());
-        let mut builder = AutoCommandBufferBuilder::primary_one_time_submit(self.device.clone(), self.queue.family()).unwrap()
-            .begin_render_pass(framebuffer.clone(), false, clear_values).unwrap();
+        let mut builder = AutoCommandBufferBuilder::primary_one_time_submit(self.device.clone(), self.queue.family()).unwrap();
+        builder.begin_render_pass(framebuffer.clone(), false, clear_values).unwrap();
 
         // Recursively draw the BSP tree starting at node 0, while keeping track of which surfaces have already been rendered.
         let mut drawn_surfaces = Vec::new();
         drawn_surfaces.resize_with(self.world.surfaces.len(), Default::default);
-        builder = self.draw_node(0, camera.position, cam_leaf.cluster, &mut drawn_surfaces, builder, dynamic_state, uniform_set.clone());
+        self.draw_node(0, camera.position, cam_leaf.cluster, &mut drawn_surfaces, &mut builder, dynamic_state, uniform_set.clone());
 
         // Models are not part of the tree and need to be rendered separately.
         for model in self.world.models.iter().skip(1)   // Model 0 appears to be a special model containing ALL surfaces, which we clearly do not want to render
@@ -615,30 +615,28 @@ impl vkcore::RendererAbstract for BspRenderer
             let model_leaf = self.world.leaf_at_position((model.mins + model.maxs) * 0.5);
             if self.world.cluster_visible(cam_leaf.cluster, self.world.leafs[model_leaf].cluster)
             {
-                builder = self.draw_model(model, &mut drawn_surfaces, builder, dynamic_state, uniform_set.clone());
+                self.draw_model(model, &mut drawn_surfaces, &mut builder, dynamic_state, uniform_set.clone());
             }
         }
 
-        builder.end_render_pass().unwrap()
-            .build().unwrap()
+        builder.end_render_pass().unwrap();
+        builder.build().unwrap()
     }
 }
 
 impl BspRenderer
 {
-    fn draw_node(&self, node_index: i32, position: cgmath::Vector3<f32>, cluster: i32, drawn_surfaces: &mut Vec<bool>, builder: AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>) -> AutoCommandBufferBuilder
+    fn draw_node(&self, node_index: i32, position: cgmath::Vector3<f32>, cluster: i32, drawn_surfaces: &mut Vec<bool>, builder: &mut AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
     {
-        let mut builder = builder;
-
         if node_index < 0
         {
             let leaf_index = !node_index as usize;
             let leaf = &self.world.leafs[leaf_index];
             if self.world.cluster_visible(cluster, leaf.cluster)
             {
-                builder = self.draw_leaf(leaf, drawn_surfaces, builder, dynamic_state, uniforms.clone());
+                self.draw_leaf(leaf, drawn_surfaces, builder, dynamic_state, uniforms.clone());
             }
-            return builder;
+            return;
         }
 
         let node = &self.world.nodes[node_index as usize];
@@ -658,15 +656,12 @@ impl BspRenderer
             last = node.front;
         }
 
-        builder = self.draw_node(first, position, cluster, drawn_surfaces, builder, dynamic_state, uniforms.clone());
-        builder = self.draw_node(last, position, cluster, drawn_surfaces, builder, dynamic_state, uniforms.clone());
-        builder
+        self.draw_node(first, position, cluster, drawn_surfaces, builder, dynamic_state, uniforms.clone());
+        self.draw_node(last, position, cluster, drawn_surfaces, builder, dynamic_state, uniforms.clone());
     }
 
-    fn draw_leaf(&self, leaf: &bsp::Leaf, drawn_surfaces: &mut Vec<bool>, builder: AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>) -> AutoCommandBufferBuilder
+    fn draw_leaf(&self, leaf: &bsp::Leaf, drawn_surfaces: &mut Vec<bool>, builder: &mut AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
     {
-        let mut builder = builder;
-
         for leaf_surf_index in leaf.first_surface..(leaf.first_surface + leaf.num_surfaces)
         {
             let surface_index = self.world.leaf_surfaces[leaf_surf_index as usize] as usize;
@@ -687,16 +682,12 @@ impl BspRenderer
             }
 
             let renderer = &self.surface_renderers[surface_index];
-            builder = renderer.draw_surface(builder, dynamic_state, uniforms.clone());
+            renderer.draw_surface(builder, dynamic_state, uniforms.clone());
         }
-
-        builder
     }
 
-    fn draw_model(&self, model: &bsp::Model, drawn_surfaces: &mut Vec<bool>, builder: AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>) -> AutoCommandBufferBuilder
+    fn draw_model(&self, model: &bsp::Model, drawn_surfaces: &mut Vec<bool>, builder: &mut AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
     {
-        let mut builder = builder;
-
         for model_surf_index in model.first_surface..(model.first_surface + model.num_surfaces)
         {
             let surface_index = model_surf_index as usize;
@@ -709,35 +700,32 @@ impl BspRenderer
             drawn_surfaces[surface_index] = true;
 
             let renderer = &self.surface_renderers[surface_index];
-            builder = renderer.draw_surface(builder, dynamic_state, uniforms.clone());
+            renderer.draw_surface(builder, dynamic_state, uniforms.clone());
         }
-
-        builder
     }
 }
 
 impl SurfaceRenderer for NoopSurfaceRenderer
 {
-    fn draw_surface(&self, builder: AutoCommandBufferBuilder, _dynamic_state: &mut DynamicState, _uniforms: Arc<dyn DescriptorSet + Sync + Send>) -> AutoCommandBufferBuilder
+    fn draw_surface(&self, _builder: &mut AutoCommandBufferBuilder, _dynamic_state: &mut DynamicState, _uniforms: Arc<dyn DescriptorSet + Sync + Send>)
     {
-        builder
     }
 }
 
 impl SurfaceRenderer for PlanarSurfaceRenderer
 {
-    fn draw_surface(&self, builder: AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>) -> AutoCommandBufferBuilder
+    fn draw_surface(&self, builder: &mut AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
     {
         let sets = (uniforms.clone(), self.descriptor_set.clone());
-        builder.draw_indexed(self.pipeline.clone(), &dynamic_state, vec!(self.vertex_slice.clone()), self.index_slice.clone(), sets, ()).unwrap()
+        builder.draw_indexed(self.pipeline.clone(), &dynamic_state, vec!(self.vertex_slice.clone()), self.index_slice.clone(), sets, ()).unwrap();
     }
 }
 
 impl SurfaceRenderer for PatchSurfaceRenderer
 {
-    fn draw_surface(&self, builder: AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>) -> AutoCommandBufferBuilder
+    fn draw_surface(&self, builder: &mut AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
     {
         let sets = (uniforms.clone(), self.descriptor_set.clone());
-        builder.draw_indexed(self.pipeline.clone(), &dynamic_state, vec!(self.vertex_slice.clone()), self.index_buffer.clone(), sets, ()).unwrap()
+        builder.draw_indexed(self.pipeline.clone(), &dynamic_state, vec!(self.vertex_slice.clone()), self.index_buffer.clone(), sets, ()).unwrap();
     }
 }
