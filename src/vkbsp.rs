@@ -221,7 +221,6 @@ struct BspRenderer
     vs_uniform_buffer: Arc<CpuBufferPool::<vs::ty::Data>>,
 
     sampler: Arc<Sampler>,
-    texture: Arc<dyn ImageViewAccess + Send + Sync>,
     lightmaps: Vec<Arc<dyn ImageViewAccess + Send + Sync>>,
 
     lightgrid_offset: cgmath::Vector3::<f32>,
@@ -291,26 +290,18 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
         SamplerAddressMode::Repeat, SamplerAddressMode::Repeat, SamplerAddressMode::Repeat,
         0.0, 16.0, 0.0, 0.0).unwrap();
 
-    let fallback_tex = load_texture(queue.clone(), "image_img.png").unwrap();
-    let mut textures = Vec::<Arc<dyn ImageViewAccess + Send + Sync>>::with_capacity(world.textures.len());
+    let fallback_tex = create_fallback_texture(queue.clone()).unwrap();
+
+    let mut textures = Vec::with_capacity(world.textures.len());
     for texture in &world.textures
     {
         textures.push(load_texture(queue.clone(), texture.name()).unwrap());
     }
 
-    let mut lightmaps = Vec::<Arc<dyn ImageViewAccess + Send + Sync>>::with_capacity(world.lightmaps.len());
+    let mut lightmaps = Vec::with_capacity(world.lightmaps.len());
     for lightmap in &world.lightmaps
     {
-        lightmaps.push({
-            let img = ImageBuffer::from_fn(bsp::LIGHTMAP_WIDTH as u32, bsp::LIGHTMAP_HEIGHT as u32, |x,y| { Rgb(color_shift_lighting(lightmap.image[y as usize][x as usize])).to_rgba() });
-            // Perform some image processing to clean up the lightmaps and make them look a bit sharper
-            // let img = image::imageops::resize(&img, bsp::LIGHTMAP_WIDTH as u32 * 4, bsp::LIGHTMAP_HEIGHT as u32 * 4, image::imageops::FilterType::Gaussian);
-            // let img = image::imageops::unsharpen(&img, 0.7, 2);
-            let (w, h) = img.dimensions();
-            let (tex, future) = ImmutableImage::from_iter(img.into_raw().iter().cloned(), Dimensions::Dim2d { width: w, height: h }, Format::R8G8B8A8Unorm, queue.clone()).unwrap();
-            future.flush().unwrap();    // TODO We could probably collect futures and join them all at once instead of going through this sequentially
-            tex
-        });
+        lightmaps.push(load_lightmap_texture(queue.clone(), &lightmap).unwrap());
     }
 
     let (dimensions, lightgrid_offset, lightgrid_scale) = world.lightgrid_dimensions();
@@ -377,7 +368,7 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
                     let layout = pipeline.descriptor_set_layout(1).unwrap();
                     let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
                         .add_sampled_image(textures.get(surface.texture_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
-                        .add_sampled_image(lightmaps.get(surface.lightmap_id as usize).unwrap_or(&lightmaps[0]).clone(), sampler.clone()).unwrap()  // TODO: handle incorrect lightmap index more gracefully
+                        .add_sampled_image(lightmaps.get(surface.lightmap_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
                         .build().unwrap()
                     );
 
@@ -420,7 +411,7 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
                     let layout = patch_pipeline.descriptor_set_layout(1).unwrap();
                     let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
                         .add_sampled_image(textures.get(surface.texture_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
-                        .add_sampled_image(lightmaps.get(surface.lightmap_id as usize).unwrap_or(&lightmaps[0]).clone(), sampler.clone()).unwrap()  // TODO: handle incorrect lightmap index more gracefully
+                        .add_sampled_image(lightmaps.get(surface.lightmap_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
                         .build().unwrap()
                     );
 
@@ -463,7 +454,6 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
         vertex_buffer: vertex_buffer.clone(), index_buffer: index_buffer.clone(),
         vs_uniform_buffer: Arc::new(vs_uniform_buffer),
         sampler: sampler.clone(),
-        texture: Arc::new(fallback_tex),
         lightmaps: lightmaps,
         lightgrid_offset: lightgrid_offset,
         lightgrid_scale: lightgrid_scale,
@@ -471,7 +461,14 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
     }
 }
 
-pub fn load_texture(queue: Arc<Queue>, tex_name: &str) -> Result<Arc<dyn ImageViewAccess + Send + Sync>, ImageCreationError>
+fn create_fallback_texture(queue: Arc<Queue>) -> Result<Arc<dyn ImageViewAccess + Send + Sync>, ImageCreationError>
+{
+    let (tex, future) = ImmutableImage::from_iter([255u8, 255u8, 255u8, 255u8].iter().cloned(), Dimensions::Dim2d { width: 1, height: 1 }, Format::R8G8B8A8Unorm, queue.clone())?;
+    future.flush().unwrap();
+    Ok(tex)
+}
+
+fn load_texture(queue: Arc<Queue>, tex_name: &str) -> Result<Arc<dyn ImageViewAccess + Send + Sync>, ImageCreationError>
 {
     let extensions = vec!("", "tga", "jpg", "png");
 
@@ -503,6 +500,18 @@ pub fn load_texture(queue: Arc<Queue>, tex_name: &str) -> Result<Arc<dyn ImageVi
     };
 
     future.flush().unwrap();
+    Ok(tex)
+}
+
+fn load_lightmap_texture(queue: Arc<Queue>, lightmap: &bsp::Lightmap) -> Result<Arc<dyn ImageViewAccess + Send + Sync>, ImageCreationError>
+{
+    let img = ImageBuffer::from_fn(bsp::LIGHTMAP_WIDTH as u32, bsp::LIGHTMAP_HEIGHT as u32, |x,y| { Rgb(color_shift_lighting(lightmap.image[y as usize][x as usize])).to_rgba() });
+    // Perform some image processing to clean up the lightmaps and make them look a bit sharper
+    // let img = image::imageops::resize(&img, bsp::LIGHTMAP_WIDTH as u32 * 4, bsp::LIGHTMAP_HEIGHT as u32 * 4, image::imageops::FilterType::Gaussian);
+    // let img = image::imageops::unsharpen(&img, 0.7, 2);
+    let (w, h) = img.dimensions();
+    let (tex, future) = ImmutableImage::from_iter(img.into_raw().iter().cloned(), Dimensions::Dim2d { width: w, height: h }, Format::R8G8B8A8Unorm, queue.clone())?;
+    future.flush().unwrap();    // TODO We could probably collect futures and join them all at once instead of going through this sequentially
     Ok(tex)
 }
 
