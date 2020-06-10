@@ -69,7 +69,7 @@ fn main() -> Result<()>
     };
     println!("Map name: {}", map_name);
 
-    vkcore::init(world, false);
+    vkcore::init(world, entities, false);
 
     Ok(())
 }

@@ -68,7 +68,7 @@ impl Camera
     }
 }
 
-pub fn init(world: bsp::World, fullscreen: bool)
+pub fn init(world: bsp::World, entities: Vec<entity::Entity>, fullscreen: bool)
 {
     // Create the Vulkan instance with whatever is required to draw to a window
     let instance = 
@@ -177,7 +177,6 @@ pub fn init(world: bsp::World, fullscreen: bool)
         }
     ).unwrap());
 
-    let entities = entity::parse_entities(&world.entities);
     let (cam_pos, cam_rot) = match entities.iter().find(|ent| ent.class_name == "info_player_deathmatch")
     {
         Some(ent) => (ent.origin + cgmath::Vector3::new(0.0, 0.0, 70.0), cgmath::Vector3::new(180.0, 0.0, ent.angle - 90.0)),
