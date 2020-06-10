@@ -220,9 +220,6 @@ struct BspRenderer
 
     vs_uniform_buffer: Arc<CpuBufferPool::<vs::ty::Data>>,
 
-    sampler: Arc<Sampler>,
-    lightmaps: Vec<Arc<dyn ImageViewAccess + Send + Sync>>,
-
     lightgrid_offset: cgmath::Vector3::<f32>,
     lightgrid_scale: cgmath::Vector3::<f32>,
 
@@ -453,8 +450,6 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
         pipeline: pipeline.clone(),
         vertex_buffer: vertex_buffer.clone(), index_buffer: index_buffer.clone(),
         vs_uniform_buffer: Arc::new(vs_uniform_buffer),
-        sampler: sampler.clone(),
-        lightmaps: lightmaps,
         lightgrid_offset: lightgrid_offset,
         lightgrid_scale: lightgrid_scale,
         surface_renderers: surface_renderers,
@@ -608,22 +603,12 @@ impl vkcore::RendererAbstract for BspRenderer
         let mut builder = AutoCommandBufferBuilder::primary_one_time_submit(self.device.clone(), self.queue.family()).unwrap()
             .begin_render_pass(framebuffer.clone(), false, clear_values).unwrap();
 
-        // Using our clever visitor pattern with closures here is trickier than it seems, because we only want to borrow data to the traversal algorithm, 
-        // but the builder pattern used by Vulkano ends up moving the builder variable into the closure with no way to move it back out again. This requires a different approach.
-        // let mut leaf_indices = Vec::new();
-        // let draw_leaf = |index: usize, _leaf: &bsp::Leaf| leaf_indices.push(index);
-        // self.world.traverse_front_to_back(cam_pos, |_index, _node| true, draw_leaf);
-
-        // for leaf_index in leaf_indices.into_iter()
-        // {
-        //     let leaf = &self.world.leafs[leaf_index];
-        //     builder = self.draw_leaf(leaf, builder, dynamic_state, uniforms.clone());
-        // }
-
+        // Recursively draw the BSP tree starting at node 0, while keeping track of which surfaces have already been rendered.
         let mut drawn_surfaces = Vec::new();
         drawn_surfaces.resize_with(self.world.surfaces.len(), Default::default);
         builder = self.draw_node(0, camera.position, cam_leaf.cluster, &mut drawn_surfaces, builder, dynamic_state, uniform_set.clone());
 
+        // Models are not part of the tree and need to be rendered separately.
         for model in self.world.models.iter().skip(1)   // Model 0 appears to be a special model containing ALL surfaces, which we clearly do not want to render
         {
             // This is a rather crude visibility check using only the model's center point but it works well enough
