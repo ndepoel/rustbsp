@@ -74,7 +74,37 @@ impl Camera
 
     pub fn projection_matrix(&self) -> cgmath::Matrix4<f32>
     {
-        cgmath::perspective(cgmath::Deg(self.fov), self.aspect, self.near, self.far)
+        // We need to define out own perspective projection matrix here since cgmath::perspective is made for use with OpenGL,
+        // which has a clip space Z range of [-1, 1]. Vulkan uses a range of [0, 1] so the projection matrix needs to be different.
+        // Based on a helper recipe from the Vulkan Cookbook.
+        let f = 1.0 / cgmath::Deg(self.fov * 0.5).tan();
+
+        let c0r0 = f / self.aspect;
+        let c0r1 = 0.0;
+        let c0r2 = 0.0;
+        let c0r3 = 0.0;
+
+        let c1r0 = 0.0;
+        let c1r1 = f;
+        let c1r2 = 0.0;
+        let c1r3 = 0.0;
+
+        let c2r0 = 0.0;
+        let c2r1 = 0.0;
+        let c2r2 = self.far / (self.near - self.far);
+        let c2r3 = -1.0;
+
+        let c3r0 = 0.0;
+        let c3r1 = 0.0;
+        let c3r2 = (self.far * self.near) / (self.near - self.far);
+        let c3r3 = 0.0;
+
+        cgmath::Matrix4::new(
+            c0r0, c0r1, c0r2, c0r3,
+            c1r0, c1r1, c1r2, c1r3,
+            c2r0, c2r1, c2r2, c2r3,
+            c3r0, c3r1, c3r2, c3r3,
+        )
     }
 }
 
