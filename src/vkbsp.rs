@@ -206,6 +206,38 @@ mod model_fs {
     }
 }
 
+mod sky_fs {
+    vulkano_shaders::shader!{
+        ty: "fragment",
+        src: "#version 450
+            layout(location = 0) in vec3 v_normal;
+            layout(location = 1) in vec2 v_tex_uv;
+            layout(location = 2) in vec2 v_lightmap_uv;
+            layout(location = 3) in vec3 v_lightgrid_uv;
+
+            layout(location = 0) out vec4 f_color;
+
+            layout(set = 1, binding = 0) uniform sampler2D mainTex;
+
+            vec2 vec_to_latlng(vec3 v)
+            {
+                v = normalize(v);
+                float lat = atan(v.y, v.x) / (2.0 * 3.14159265);
+                float lng = 0.5 + asin(v.z) / 3.14159265;
+                return vec2(lat, lng);
+            }
+
+            void main() {
+                vec4 texColor = texture(mainTex, v_tex_uv);
+
+                // TODO try this again but with window coordinates and unprojection as in my old sphere raycasting project
+                // We'll also need to pass the inverse view matrix into here (or just the transpose, easier)
+                f_color = vec4(gl_FragCoord.x / 1920, gl_FragCoord.y / 1080, 0, 1);
+            }
+        "
+    }
+}
+
 struct BspRenderer
 {
     device: Arc<Device>,
@@ -253,6 +285,7 @@ struct PatchSurfaceRenderer
 }
 
 type MeshSurfaceRenderer = PlanarSurfaceRenderer;   // At the moment these two work identically, but conceptually I'd like to keep them distinct
+type SkySurfaceRenderer = PlanarSurfaceRenderer;
 
 // We actually might want to pull the renderpass and framebuffer creation into here as well, to allow more flexibility in what and how we render. That's something for later though.
 pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderPassAbstract + Send + Sync>, world: bsp::World) -> impl vkcore::RendererAbstract
@@ -277,6 +310,7 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
     let tes = tes::Shader::load(device.clone()).unwrap();
     let world_fs = world_fs::Shader::load(device.clone()).unwrap();
     let model_fs = model_fs::Shader::load(device.clone()).unwrap();
+    let sky_fs = sky_fs::Shader::load(device.clone()).unwrap();
 
     let vs_uniform_buffer = CpuBufferPool::<vs::ty::Data>::new(device.clone(), BufferUsage::uniform_buffer());
 
@@ -345,6 +379,19 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
         .build(device.clone())
         .unwrap());
 
+    let sky_pipeline = Arc::new(GraphicsPipeline::start()
+        .vertex_input_single_buffer::<bsp::Vertex>()
+        .vertex_shader(vs.main_entry_point(), ())
+        .triangle_list()
+        //.polygon_mode_line()
+        .cull_mode_front()
+        .viewports_dynamic_scissors_irrelevant(1)
+        .fragment_shader(sky_fs.main_entry_point(), ())
+        .depth_stencil_simple_depth()
+        .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
+        .build(device.clone())
+        .unwrap());
+
     let mut surface_renderers = Vec::<Box<dyn SurfaceRenderer>>::with_capacity(world.surfaces.len());
     for surface in &world.surfaces
     {
@@ -361,20 +408,38 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
             {
                 bsp::SurfaceType::Planar =>
                 {
-                    let layout = pipeline.descriptor_set_layout(1).unwrap();
-                    let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
-                        .add_sampled_image(textures.get(surface.texture_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
-                        .add_sampled_image(lightmaps.get(surface.lightmap_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
-                        .build().unwrap()
-                    );
-
-                    Box::new(PlanarSurfaceRenderer
+                    let flags = world.textures.get(surface.texture_id as usize).and_then(|t| Some(t.surface_flags)).unwrap_or(bsp::SurfaceFlags::empty());
+                    if flags.contains(bsp::SurfaceFlags::SKY)
                     {
-                        pipeline: pipeline.clone(),
-                        vertex_slice: vertex_slice.clone(),
-                        index_slice: index_slice.clone(),
-                        descriptor_set: descriptor_set.clone(),
-                    })
+                        let layout = sky_pipeline.descriptor_set_layout(1).unwrap();
+                        let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
+                            .add_sampled_image(textures.get(surface.texture_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
+                            .build().unwrap());
+
+                        Box::new(SkySurfaceRenderer
+                        {
+                            pipeline: sky_pipeline.clone(),
+                            vertex_slice: vertex_slice.clone(),
+                            index_slice: index_slice.clone(),
+                            descriptor_set: descriptor_set.clone(),
+                        })
+                    }
+                    else
+                    {
+                        let layout = pipeline.descriptor_set_layout(1).unwrap();
+                        let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
+                            .add_sampled_image(textures.get(surface.texture_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
+                            .add_sampled_image(lightmaps.get(surface.lightmap_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
+                            .build().unwrap());
+
+                        Box::new(PlanarSurfaceRenderer
+                        {
+                            pipeline: pipeline.clone(),
+                            vertex_slice: vertex_slice.clone(),
+                            index_slice: index_slice.clone(),
+                            descriptor_set: descriptor_set.clone(),
+                        })
+                    }
                 },
                 bsp::SurfaceType::Patch =>
                 {
@@ -670,9 +735,8 @@ impl BspRenderer
 
             let surface = &self.world.surfaces[surface_index];
             let texture = &self.world.textures[surface.texture_id as usize];
-            if texture.surface_flags.contains(bsp::SurfaceFlags::SKY) || texture.surface_flags.contains(bsp::SurfaceFlags::NODRAW)
+            if texture.surface_flags.contains(bsp::SurfaceFlags::NODRAW)
             {
-                // TODO: Sky surfaces require a different set of shaders
                 continue;
             }
 
@@ -711,6 +775,9 @@ impl SurfaceRenderer for PlanarSurfaceRenderer
 {
     fn draw_surface(&self, builder: &mut AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
     {
+        // TODO Building secondary command buffers per surface or leaf would probably speed this up a whole lot => tried it, but you can't pass dynamic state or per-frame uniforms to a pre-built secondary command buffer :/
+        // TODO This could possibly be done more efficiently using indirect drawing instead of using buffer slices, but I'm getting stuck with Vulkano's arcane type requirements
+        // TODO Look if SyncCommandBufferBuilder can be a valid alternative (split up state binding and draw calls)
         let sets = (uniforms.clone(), self.descriptor_set.clone());
         builder.draw_indexed(self.pipeline.clone(), &dynamic_state, vec!(self.vertex_slice.clone()), self.index_slice.clone(), sets, ()).unwrap();
     }
