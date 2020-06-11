@@ -572,14 +572,13 @@ impl vkcore::RendererAbstract for BspRenderer
         let leaf_index = self.world.leaf_at_position(camera.position);
         let cam_leaf = &self.world.leafs[leaf_index];
 
-        let viewport = &dynamic_state.viewports.as_ref().unwrap()[0];
         let uniforms =
         {
             let uniform_data = vs::ty::Data
             {
                 model: cgmath::Matrix4::from_scale(1.0).into(), // Just an identity matrix; the world doesn't move
-                view: camera.to_view_matrix().into(),
-                proj: cgmath::perspective(cgmath::Deg(60.0), viewport.dimensions[0] / viewport.dimensions[1], 8.0, 8000.0).into(),
+                view: camera.view_matrix().into(),
+                proj: camera.projection_matrix().into(),
                 lightgrid: self.lightgrid_transform.into(),
             };
 

@@ -38,13 +38,18 @@ pub struct Camera
     pub position: cgmath::Vector3<f32>,
     pub rotation: cgmath::Vector3<f32>, // Pitch, roll, yaw
 
+    fov: f32,
+    aspect: f32,
+    near: f32,
+    far: f32,
+
     mouse_sensitivity: f32,
     movement_speed: f32,
 }
 
 impl Camera
 {
-    pub fn to_view_matrix(&self) -> cgmath::Matrix4<f32>
+    pub fn view_matrix(&self) -> cgmath::Matrix4<f32>
     {
         // Start off with a view matrix that moves us from Vulkan's coordinate system to Quake's (+Z is up)
         let view = cgmath::Matrix4::from_cols(
@@ -65,6 +70,11 @@ impl Camera
         cgmath::Quaternion::from_angle_z(cgmath::Deg(self.rotation.z)) *
         cgmath::Quaternion::from_angle_x(cgmath::Deg(self.rotation.x)) *
         cgmath::Quaternion::from_angle_y(cgmath::Deg(self.rotation.y))
+    }
+
+    pub fn projection_matrix(&self) -> cgmath::Matrix4<f32>
+    {
+        cgmath::perspective(cgmath::Deg(self.fov), self.aspect, self.near, self.far)
     }
 }
 
@@ -190,13 +200,19 @@ pub fn init(world: bsp::World, entities: Vec<entity::Entity>, fullscreen: bool)
     let framebuffers = window_size_dependent_setup(device.clone(), &images, render_pass.clone(), &mut dynamic_state);
     let mut previous_frame_end = Some(Box::new(sync::now(device.clone())) as Box<dyn GpuFuture>);
 
+    let viewport = &dynamic_state.viewports.as_ref().unwrap()[0];
     let mut camera = Camera
     { 
         position: cam_pos,
         rotation: cam_rot,
+        fov: 60.0,
+        aspect: viewport.dimensions[0] / viewport.dimensions[1],
+        near: 8.0,
+        far: 8000.0,
         mouse_sensitivity: 0.08,
         movement_speed: 250.0,
     };
+
     let start_time = Instant::now();
     let mut prev_time = 0.0;
     let mut movement = cgmath::Vector3::new(0.0, 0.0, 0.0);
