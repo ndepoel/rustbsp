@@ -38,8 +38,11 @@ pub struct Camera
     pub position: cgmath::Vector3<f32>,
     pub rotation: cgmath::Vector3<f32>, // Pitch, roll, yaw
 
+    pub time: f32,
+    pub time_delta: f32,
+
+    dimensions: [f32; 2],
     fov: f32,
-    aspect: f32,
     near: f32,
     far: f32,
 
@@ -54,7 +57,7 @@ impl Camera
         // Start off with a view matrix that moves us from Vulkan's coordinate system to Quake's (+Z is up)
         let view = cgmath::Matrix4::from_cols(
             cgmath::Vector4::new(1.0, 0.0, 0.0, 0.0),
-            cgmath::Vector4::new(0.0, 0.0, 1.0, 0.0),
+            cgmath::Vector4::new(0.0, 0.0, -1.0, 0.0),
             cgmath::Vector4::new(0.0, 1.0, 0.0, 0.0),
             cgmath::Vector4::new(0.0, 0.0, 0.0, 1.0));
 
@@ -78,14 +81,15 @@ impl Camera
         // which has a clip space Z range of [-1, 1]. Vulkan uses a range of [0, 1] so the projection matrix needs to be different.
         // Based on a helper recipe from the Vulkan Cookbook.
         let f = 1.0 / cgmath::Deg(self.fov * 0.5).tan();
+        let aspect = self.aspect_ratio();
 
-        let c0r0 = f / self.aspect;
+        let c0r0 = f / aspect;
         let c0r1 = 0.0;
         let c0r2 = 0.0;
         let c0r3 = 0.0;
 
         let c1r0 = 0.0;
-        let c1r1 = f;
+        let c1r1 = -f;
         let c1r2 = 0.0;
         let c1r3 = 0.0;
 
@@ -105,6 +109,21 @@ impl Camera
             c2r0, c2r1, c2r2, c2r3,
             c3r0, c3r1, c3r2, c3r3,
         )
+    }
+
+    pub fn width(&self) -> f32
+    {
+        self.dimensions[0]
+    }
+
+    pub fn height(&self) -> f32
+    {
+        self.dimensions[1]
+    }
+
+    pub fn aspect_ratio(&self) -> f32
+    {
+        self.dimensions[0] / self.dimensions[1]
     }
 }
 
@@ -219,7 +238,7 @@ pub fn init(world: bsp::World, entities: Vec<entity::Entity>, fullscreen: bool)
 
     let (cam_pos, cam_rot) = match entities.iter().find(|ent| ent.class_name == "info_player_deathmatch")
     {
-        Some(ent) => (ent.origin + cgmath::Vector3::new(0.0, 0.0, 70.0), cgmath::Vector3::new(180.0, 0.0, ent.angle - 90.0)),
+        Some(ent) => (ent.origin + cgmath::Vector3::new(0.0, 0.0, 70.0), cgmath::Vector3::new(0.0, 0.0, ent.angle - 90.0)),
         None => (cgmath::Vector3::new(300.0, 40.0, 540.0), cgmath::Vector3::new(180.0, 0.0, 0.0))
     };
 
@@ -235,10 +254,12 @@ pub fn init(world: bsp::World, entities: Vec<entity::Entity>, fullscreen: bool)
     { 
         position: cam_pos,
         rotation: cam_rot,
+        dimensions: viewport.dimensions,
         fov: 60.0,
-        aspect: viewport.dimensions[0] / viewport.dimensions[1],
         near: 8.0,
         far: 8000.0,
+        time: 0.0,
+        time_delta: 0.0,
         mouse_sensitivity: 0.08,
         movement_speed: 250.0,
     };
@@ -281,6 +302,8 @@ pub fn init(world: bsp::World, entities: Vec<entity::Entity>, fullscreen: bool)
                 let amount = if smooth_cam { time_delta * 2.0 } else { 1.0 };
                 camera.position = camera.position.lerp(target_position, amount);
                 camera.rotation = camera.rotation.lerp(target_rotation, amount);
+                camera.time = time;
+                camera.time_delta = time_delta;
 
                 // Build the command buffer; apparently building the command buffer on each frame IS expected (good to know)
                 // This would typically be delegated to another function where the actual setup of whatever you want to render would happen.
@@ -332,12 +355,12 @@ pub fn init(world: bsp::World, entities: Vec<entity::Entity>, fullscreen: bool)
                 let value = if pressed { 1.0 } else { 0.0 };
                 match input.virtual_keycode
                 {
-                    Some(VirtualKeyCode::W) => movement.y = -value,
-                    Some(VirtualKeyCode::S) => movement.y = value,
+                    Some(VirtualKeyCode::W) => movement.y = value,
+                    Some(VirtualKeyCode::S) => movement.y = -value,
                     Some(VirtualKeyCode::A) => movement.x = -value,
                     Some(VirtualKeyCode::D) => movement.x = value,
-                    Some(VirtualKeyCode::Q) => movement.z = value,
-                    Some(VirtualKeyCode::E) => movement.z = -value,
+                    Some(VirtualKeyCode::Q) => movement.z = -value,
+                    Some(VirtualKeyCode::E) => movement.z = value,
                     Some(VirtualKeyCode::LShift) => movement_multiplier = 1.0 + value * 0.7,
                     Some(VirtualKeyCode::F1) => if pressed { smooth_cam = !smooth_cam; },
                     _ => ()
