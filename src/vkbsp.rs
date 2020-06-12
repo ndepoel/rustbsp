@@ -223,7 +223,8 @@ mod sky_fs {
                 vec2 unproj_scale;
                 vec2 unproj_offset;
                 mat4 view_transpose;
-                float time;
+                vec2 scroll;
+                vec2 scale;
             } pc;
 
             vec2 vec_to_latlng(vec3 v)
@@ -243,8 +244,8 @@ mod sky_fs {
                 vec2 uv = vec_to_latlng(ray_world);
                 
                 // Modify sky texture coords as specified by the textures/skies/tim_hell shader
-                uv = uv + fract(vec2(0.05, 0.1) * pc.time);
-                uv = uv * 2;
+                uv += pc.scroll;
+                uv *= pc.scale;
 
                 f_color = texture(mainTex, -uv);
             }
@@ -827,7 +828,8 @@ impl SurfaceRenderer for SkySurfaceRenderer
             unproj_scale: [2.0 * xmax / camera.width(), 2.0 * ymax / camera.height()],
             unproj_offset: [-xmax, -ymax],
             view_transpose: camera.view_matrix().transpose().into(),
-            time: camera.time,
+            scroll: [0.05 * camera.time, 0.1 * camera.time],
+            scale: [3.0, 2.0],
         };
 
         builder.draw_indexed(self.pipeline.clone(), &dynamic_state, vec!(self.vertex_slice.clone()), self.index_slice.clone(), sets, pc).unwrap();
