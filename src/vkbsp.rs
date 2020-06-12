@@ -756,7 +756,7 @@ impl BspRenderer
 
             let surface = &self.world.surfaces[surface_index];
             let texture = &self.world.textures[surface.texture_id as usize];
-            if texture.surface_flags.contains(bsp::SurfaceFlags::NODRAW)
+            if texture.surface_flags.contains(bsp::SurfaceFlags::NODRAW) || texture.content_flags.contains(bsp::ContentFlags::FOG)
             {
                 continue;
             }
