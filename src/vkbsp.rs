@@ -27,229 +27,51 @@ use super::bsp;
 
 vulkano::impl_vertex!(bsp::Vertex, position, texture_coord, lightmap_coord, normal);
 
+// Universal vertex shader, including lightmap and lightgrid texture coordinates
 mod vs {
     vulkano_shaders::shader!{
         ty: "vertex",
-        src: "#version 450
-            layout(location = 0) in vec3 position;
-            layout(location = 1) in vec2 texture_coord;
-            layout(location = 2) in vec2 lightmap_coord;
-            layout(location = 3) in vec3 normal;
-
-            layout(location = 0) out vec3 v_normal;
-            layout(location = 1) out vec2 v_tex_uv;
-            layout(location = 2) out vec2 v_lightmap_uv;
-            layout(location = 3) out vec3 v_lightgrid_uv;
-
-            layout(set = 0, binding = 0) uniform Data {
-                mat4 model;
-                mat4 view;
-                mat4 proj;
-                mat4 lightgrid;
-            } uniforms;
-
-            void main() {
-                mat4 modelview = uniforms.view * uniforms.model;
-                gl_Position = uniforms.proj * modelview * vec4(position, 1.0);
-                v_normal = transpose(inverse(mat3(uniforms.model))) * normal;   // World-space normal
-                v_tex_uv = texture_coord;
-                v_lightmap_uv = lightmap_coord;
-                v_lightgrid_uv = (uniforms.lightgrid * uniforms.model * vec4(position, 1.0)).xyz;
-            }
-        "
+        path: "shaders/uber.vert",
     }
 }
 
+// Tesselation control shader for bi-quadratic Bezier curved surfaces
 mod tcs {
     vulkano_shaders::shader!{
         ty: "tess_ctrl",
-        src: "#version 450
-            layout(vertices = 9) out;   // Patches are defined by a 3x3 grid of control points
-
-            layout(location = 0) in vec3 v_normal[];
-            layout(location = 1) in vec2 v_tex_uv[];
-            layout(location = 2) in vec2 v_lightmap_uv[];
-            layout(location = 3) in vec3 v_lightgrid_uv[];
-
-            layout(location = 0) out vec3 tc_normal[];
-            layout(location = 1) out vec2 tc_tex_uv[];
-            layout(location = 2) out vec2 tc_lightmap_uv[];
-            layout(location = 3) out vec3 tc_lightgrid_uv[];
-
-            void main() {
-                gl_out[gl_InvocationID].gl_Position = gl_in[gl_InvocationID].gl_Position;
-                tc_normal[gl_InvocationID] = v_normal[gl_InvocationID];
-                tc_tex_uv[gl_InvocationID] = v_tex_uv[gl_InvocationID];
-                tc_lightmap_uv[gl_InvocationID] = v_lightmap_uv[gl_InvocationID];
-                tc_lightgrid_uv[gl_InvocationID] = v_lightgrid_uv[gl_InvocationID];
-
-                gl_TessLevelInner[0] = 20;
-                gl_TessLevelInner[1] = 20;
-                gl_TessLevelOuter[0] = 20;
-                gl_TessLevelOuter[1] = 20;
-                gl_TessLevelOuter[2] = 20;
-                gl_TessLevelOuter[3] = 20;
-            }
-        "
+        path: "shaders/bezier.tesc",
     }
 }
 
-// Quake 3 patch surfaces are bi-quadratic Bezier surfaces.
-// This tessellation shader takes 9 control values per vertex element and evaluates them.
+// Tesselation evaluation shader for bi-quadratic Bezier curved surfaces
 mod tes {
     vulkano_shaders::shader!{
         ty: "tess_eval",
-        src: "#version 450
-            layout(quads, equal_spacing, cw) in;    // We use quad topology because Quake 3's patches are rectangular
-
-            layout(location = 0) in vec3 tc_normal[];
-            layout(location = 1) in vec2 tc_tex_uv[];
-            layout(location = 2) in vec2 tc_lightmap_uv[];
-            layout(location = 3) in vec3 tc_lightgrid_uv[];
-        
-            layout(location = 0) out vec3 te_normal;
-            layout(location = 1) out vec2 te_tex_uv;
-            layout(location = 2) out vec2 te_lightmap_uv;
-            layout(location = 3) out vec3 te_lightgrid_uv;
-
-            void main() {
-                gl_Position = vec4(0, 0, 0, 0);
-                te_normal = vec3(0, 0, 0);
-                te_tex_uv = vec2(0, 0);
-                te_lightmap_uv = vec2(0, 0);
-                te_lightgrid_uv = vec3(0, 0, 0);
-
-                vec2 tmp = 1.0 - gl_TessCoord.xy;
-                vec3 bx = vec3(tmp.x * tmp.x, 2 * gl_TessCoord.x * tmp.x, gl_TessCoord.x * gl_TessCoord.x);
-                vec3 by = vec3(tmp.y * tmp.y, 2 * gl_TessCoord.y * tmp.y, gl_TessCoord.y * gl_TessCoord.y);
-
-                for (int i = 0; i < 3; i++)
-                {
-                    for (int j = 0; j < 3; j++)
-                    {
-                        float b = bx[i] * by[j];
-                        int n = i * 3 + j;
-
-                        gl_Position += gl_in[n].gl_Position * b;
-                        te_normal += tc_normal[n] * b;
-                        te_tex_uv += tc_tex_uv[n] * b;
-                        te_lightmap_uv += tc_lightmap_uv[n] * b;
-                        te_lightgrid_uv += tc_lightgrid_uv[n] * b;
-                    }
-                }
-            }
-        "
+        path: "shaders/bezier.tese",
     }
 }
 
+// Fragment shader for opaque world geometry lit using a lightmap
 mod world_fs {
     vulkano_shaders::shader!{
         ty: "fragment",
-        src: "#version 450
-            layout(location = 0) in vec3 v_normal;
-            layout(location = 1) in vec2 v_tex_uv;
-            layout(location = 2) in vec2 v_lightmap_uv;
-            layout(location = 3) in vec3 v_lightgrid_uv;
-
-            layout(location = 0) out vec4 f_color;
-
-            layout(set = 1, binding = 0) uniform sampler2D mainTex;
-            layout(set = 1, binding = 1) uniform sampler2D lightmapTex;
-
-            void main() {
-                vec4 texColor = texture(mainTex, v_tex_uv);
-                vec4 lightmapColor = texture(lightmapTex, v_lightmap_uv);
-
-                //f_color = lightmapColor;   // Just the lightmap
-                //f_color = vec4((normalize(v_normal) + vec3(1, 1, 1)) * 0.5, 1.0);    // World-space normals
-                f_color = texColor * lightmapColor;
-            }
-        "
+        path: "shaders/world.frag",
     }
 }
 
+// Fragment shader for opaque model objects lit using the lightgrid
 mod model_fs {
     vulkano_shaders::shader!{
         ty: "fragment",
-        src: "#version 450
-            layout(location = 0) in vec3 v_normal;
-            layout(location = 1) in vec2 v_tex_uv;
-            layout(location = 2) in vec2 v_lightmap_uv;
-            layout(location = 3) in vec3 v_lightgrid_uv;
-
-            layout(location = 0) out vec4 f_color;
-
-            layout(set = 1, binding = 0) uniform sampler2D mainTex;
-            layout(set = 1, binding = 1) uniform sampler3D lightgridTexA;
-            layout(set = 1, binding = 2) uniform sampler3D lightgridTexB;
-
-            vec3 decode_latlng(float lat, float lng)
-            {
-                return vec3(cos(lat) * sin(lng), sin(lat) * sin(lng), cos(lng));
-            }
-
-            void main() {
-                vec4 texColor = texture(mainTex, v_tex_uv);
-
-                vec4 lightgridA = texture(lightgridTexA, v_lightgrid_uv);
-                vec4 lightgridB = texture(lightgridTexB, v_lightgrid_uv);
-                vec3 ambient = lightgridA.rgb;
-                vec3 directional = lightgridB.rgb;
-                vec3 light_dir = decode_latlng(lightgridA.w, lightgridB.w);
-                float brightness = clamp(dot(normalize(v_normal), light_dir), 0.0, 1.0);
-                vec4 lighting = vec4(ambient + brightness * directional, 1.0);
-                //f_color = vec4(lighting, 1.0);    // Just the light grid factor
-
-                f_color = texColor * lighting;
-            }
-        "
+        path: "shaders/model.frag",
     }
 }
 
+// Fragment shader for a raycast animated sky surface
 mod sky_fs {
     vulkano_shaders::shader!{
         ty: "fragment",
-        src: "#version 450
-            layout(location = 0) in vec3 v_normal;
-            layout(location = 1) in vec2 v_tex_uv;
-            layout(location = 2) in vec2 v_lightmap_uv;
-            layout(location = 3) in vec3 v_lightgrid_uv;
-
-            layout(location = 0) out vec4 f_color;
-
-            layout(set = 1, binding = 0) uniform sampler2D mainTex;
-
-            layout(push_constant) uniform PushConstantData {
-                vec2 unproj_scale;
-                vec2 unproj_offset;
-                mat4 view_transpose;
-                vec2 scroll;
-                vec2 scale;
-            } pc;
-
-            vec2 vec_to_latlng(vec3 v)
-            {
-                v = normalize(v);
-                float lat = 0.5 + atan(v.y, v.x) / (2.0 * 3.14159265);
-                float lng = 0.5 + asin(v.z) / 3.14159265;
-                return vec2(lat, lng);
-            }
-
-            void main() {
-                // Convert pixel position to a view ray and transform it to world space
-                vec3 ray_eye = vec3(gl_FragCoord.xy * pc.unproj_scale + pc.unproj_offset, -1);
-                vec3 ray_world = mat3(pc.view_transpose) * ray_eye;
-
-                // Convert world-space ray to spherical coordinates for a skydome effect
-                vec2 uv = vec_to_latlng(ray_world);
-                
-                // Modify sky texture coords as specified by the textures/skies/tim_hell shader
-                uv += pc.scroll;
-                uv *= pc.scale;
-
-                f_color = texture(mainTex, -uv);
-            }
-        "
+        path: "shaders/sky.frag",
     }
 }
 
