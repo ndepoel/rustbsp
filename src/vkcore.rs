@@ -344,8 +344,8 @@ pub fn init(world: bsp::World, entities: Vec<entity::Entity>, fullscreen: bool)
                 let value = if state == ElementState::Pressed { 1.0 } else { 0.0 };
                 match button
                 {
-                    MouseButton::Left => movement.y = -value,
-                    MouseButton::Right => movement.z = -value,
+                    MouseButton::Left => movement.y = value,
+                    MouseButton::Right => movement.z = value,
                     _ => ()
                 };
             },
