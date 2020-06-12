@@ -219,20 +219,34 @@ mod sky_fs {
 
             layout(set = 1, binding = 0) uniform sampler2D mainTex;
 
+            layout(push_constant) uniform PushConstantData {
+                vec2 unproj_scale;
+                vec2 unproj_offset;
+                mat4 view_transpose;
+                float time;
+            } pc;
+
             vec2 vec_to_latlng(vec3 v)
             {
                 v = normalize(v);
-                float lat = atan(v.y, v.x) / (2.0 * 3.14159265);
+                float lat = 0.5 + atan(v.y, v.x) / (2.0 * 3.14159265);
                 float lng = 0.5 + asin(v.z) / 3.14159265;
                 return vec2(lat, lng);
             }
 
             void main() {
-                vec4 texColor = texture(mainTex, v_tex_uv);
+                // Convert pixel position to a view ray and transform it to world space
+                vec3 ray_eye = vec3(gl_FragCoord.xy * pc.unproj_scale + pc.unproj_offset, -1);
+                vec3 ray_world = mat3(pc.view_transpose) * ray_eye;
 
-                // TODO try this again but with window coordinates and unprojection as in my old sphere raycasting project
-                // We'll also need to pass the inverse view matrix into here (or just the transpose, easier)
-                f_color = vec4(gl_FragCoord.x / 1920, gl_FragCoord.y / 1080, 0, 1);
+                // Convert world-space ray to spherical coordinates for a skydome effect
+                vec2 uv = vec_to_latlng(ray_world);
+                
+                // Modify sky texture coords as specified by the textures/skies/tim_hell shader
+                uv = uv + fract(vec2(0.05, 0.1) * pc.time);
+                uv = uv * 2;
+
+                f_color = texture(mainTex, -uv);
             }
         "
     }
@@ -258,7 +272,7 @@ struct BspRenderer
 
 trait SurfaceRenderer
 {
-    fn draw_surface(&self, builder: &mut AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>);
+    fn draw_surface(&self, builder: &mut AutoCommandBufferBuilder, camera: &vkcore::Camera, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>);
 }
 
 struct NoopSurfaceRenderer
@@ -284,8 +298,15 @@ struct PatchSurfaceRenderer
     descriptor_set: Arc<dyn DescriptorSet + Sync + Send>,
 }
 
+struct SkySurfaceRenderer
+{
+    pipeline: Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
+    vertex_slice: Arc<BufferSlice<[bsp::Vertex], Arc<ImmutableBuffer<[bsp::Vertex]>>>>,
+    index_slice: Arc<BufferSlice<[u32], Arc<ImmutableBuffer<[u32]>>>>,
+    descriptor_set: Arc<dyn DescriptorSet + Sync + Send>,
+}
+
 type MeshSurfaceRenderer = PlanarSurfaceRenderer;   // At the moment these two work identically, but conceptually I'd like to keep them distinct
-type SkySurfaceRenderer = PlanarSurfaceRenderer;
 
 // We actually might want to pull the renderpass and framebuffer creation into here as well, to allow more flexibility in what and how we render. That's something for later though.
 pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderPassAbstract + Send + Sync>, world: bsp::World) -> impl vkcore::RendererAbstract
@@ -528,7 +549,7 @@ fn create_fallback_texture(queue: Arc<Queue>) -> Result<Arc<dyn ImageViewAccess 
 
 fn load_texture(queue: Arc<Queue>, tex_name: &str) -> Result<Arc<dyn ImageViewAccess + Send + Sync>, ImageCreationError>
 {
-    let extensions = vec!("", "tga", "jpg", "png");
+    let extensions = vec!("", "png", "tga", "jpg"); // Check PNG first so we can easily override Quake's TGA or JPG textures with our own substitutes
 
     let mut file_path = PathBuf::from(tex_name);
     for ext in extensions.iter()
@@ -666,7 +687,7 @@ impl vkcore::RendererAbstract for BspRenderer
         // Recursively draw the BSP tree starting at node 0, while keeping track of which surfaces have already been rendered.
         let mut drawn_surfaces = Vec::new();
         drawn_surfaces.resize_with(self.world.surfaces.len(), Default::default);
-        self.draw_node(0, camera.position, cam_leaf.cluster, &mut drawn_surfaces, &mut builder, dynamic_state, uniform_set.clone());
+        self.draw_node(0, camera, cam_leaf.cluster, &mut drawn_surfaces, &mut builder, dynamic_state, uniform_set.clone());
 
         // Models are not part of the tree and need to be rendered separately.
         for model in self.world.models.iter().skip(1)   // Model 0 appears to be a special model containing ALL surfaces, which we clearly do not want to render
@@ -675,7 +696,7 @@ impl vkcore::RendererAbstract for BspRenderer
             let model_leaf = self.world.leaf_at_position((model.mins + model.maxs) * 0.5);
             if self.world.cluster_visible(cam_leaf.cluster, self.world.leafs[model_leaf].cluster)
             {
-                self.draw_model(model, &mut drawn_surfaces, &mut builder, dynamic_state, uniform_set.clone());
+                self.draw_model(model, camera, &mut drawn_surfaces, &mut builder, dynamic_state, uniform_set.clone());
             }
         }
 
@@ -686,7 +707,7 @@ impl vkcore::RendererAbstract for BspRenderer
 
 impl BspRenderer
 {
-    fn draw_node(&self, node_index: i32, position: cgmath::Vector3<f32>, cluster: i32, drawn_surfaces: &mut Vec<bool>, builder: &mut AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
+    fn draw_node(&self, node_index: i32, camera: &vkcore::Camera, cluster: i32, drawn_surfaces: &mut Vec<bool>, builder: &mut AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
     {
         if node_index < 0
         {
@@ -694,7 +715,7 @@ impl BspRenderer
             let leaf = &self.world.leafs[leaf_index];
             if self.world.cluster_visible(cluster, leaf.cluster)
             {
-                self.draw_leaf(leaf, drawn_surfaces, builder, dynamic_state, uniforms.clone());
+                self.draw_leaf(leaf, camera, drawn_surfaces, builder, dynamic_state, uniforms.clone());
             }
             return;
         }
@@ -705,7 +726,7 @@ impl BspRenderer
         let last: i32;
         let plane = &self.world.planes[node.plane as usize];
 
-        if plane.point_distance(position) >= 0.0
+        if plane.point_distance(camera.position) >= 0.0
         {
             first = node.front;
             last = node.back;
@@ -716,11 +737,11 @@ impl BspRenderer
             last = node.front;
         }
 
-        self.draw_node(first, position, cluster, drawn_surfaces, builder, dynamic_state, uniforms.clone());
-        self.draw_node(last, position, cluster, drawn_surfaces, builder, dynamic_state, uniforms.clone());
+        self.draw_node(first, camera, cluster, drawn_surfaces, builder, dynamic_state, uniforms.clone());
+        self.draw_node(last, camera, cluster, drawn_surfaces, builder, dynamic_state, uniforms.clone());
     }
 
-    fn draw_leaf(&self, leaf: &bsp::Leaf, drawn_surfaces: &mut Vec<bool>, builder: &mut AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
+    fn draw_leaf(&self, leaf: &bsp::Leaf, camera: &vkcore::Camera, drawn_surfaces: &mut Vec<bool>, builder: &mut AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
     {
         for leaf_surf_index in leaf.first_surface..(leaf.first_surface + leaf.num_surfaces)
         {
@@ -741,11 +762,11 @@ impl BspRenderer
             }
 
             let renderer = &self.surface_renderers[surface_index];
-            renderer.draw_surface(builder, dynamic_state, uniforms.clone());
+            renderer.draw_surface(builder, camera, dynamic_state, uniforms.clone());
         }
     }
 
-    fn draw_model(&self, model: &bsp::Model, drawn_surfaces: &mut Vec<bool>, builder: &mut AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
+    fn draw_model(&self, model: &bsp::Model, camera: &vkcore::Camera, drawn_surfaces: &mut Vec<bool>, builder: &mut AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
     {
         for model_surf_index in model.first_surface..(model.first_surface + model.num_surfaces)
         {
@@ -759,21 +780,21 @@ impl BspRenderer
             drawn_surfaces[surface_index] = true;
 
             let renderer = &self.surface_renderers[surface_index];
-            renderer.draw_surface(builder, dynamic_state, uniforms.clone());
+            renderer.draw_surface(builder, camera, dynamic_state, uniforms.clone());
         }
     }
 }
 
 impl SurfaceRenderer for NoopSurfaceRenderer
 {
-    fn draw_surface(&self, _builder: &mut AutoCommandBufferBuilder, _dynamic_state: &mut DynamicState, _uniforms: Arc<dyn DescriptorSet + Sync + Send>)
+    fn draw_surface(&self, _builder: &mut AutoCommandBufferBuilder, _camera: &vkcore::Camera, _dynamic_state: &mut DynamicState, _uniforms: Arc<dyn DescriptorSet + Sync + Send>)
     {
     }
 }
 
 impl SurfaceRenderer for PlanarSurfaceRenderer
 {
-    fn draw_surface(&self, builder: &mut AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
+    fn draw_surface(&self, builder: &mut AutoCommandBufferBuilder, _camera: &vkcore::Camera, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
     {
         // TODO Building secondary command buffers per surface or leaf would probably speed this up a whole lot => tried it, but you can't pass dynamic state or per-frame uniforms to a pre-built secondary command buffer :/
         // TODO This could possibly be done more efficiently using indirect drawing instead of using buffer slices, but I'm getting stuck with Vulkano's arcane type requirements
@@ -785,9 +806,30 @@ impl SurfaceRenderer for PlanarSurfaceRenderer
 
 impl SurfaceRenderer for PatchSurfaceRenderer
 {
-    fn draw_surface(&self, builder: &mut AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
+    fn draw_surface(&self, builder: &mut AutoCommandBufferBuilder, _camera: &vkcore::Camera, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
     {
         let sets = (uniforms.clone(), self.descriptor_set.clone());
         builder.draw_indexed(self.pipeline.clone(), &dynamic_state, vec!(self.vertex_slice.clone()), self.index_buffer.clone(), sets, ()).unwrap();
+    }
+}
+
+impl SurfaceRenderer for SkySurfaceRenderer
+{
+    fn draw_surface(&self, builder: &mut AutoCommandBufferBuilder, camera: &vkcore::Camera, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
+    {
+        let sets = (uniforms.clone(), self.descriptor_set.clone());
+        
+        let proj_matrix = camera.projection_matrix();
+        let xmax = 1.0 / proj_matrix[0][0];
+        let ymax = 1.0 / proj_matrix[1][1];
+        let pc = sky_fs::ty::PushConstantData
+        {
+            unproj_scale: [2.0 * xmax / camera.width(), 2.0 * ymax / camera.height()],
+            unproj_offset: [-xmax, -ymax],
+            view_transpose: camera.view_matrix().transpose().into(),
+            time: camera.time,
+        };
+
+        builder.draw_indexed(self.pipeline.clone(), &dynamic_state, vec!(self.vertex_slice.clone()), self.index_slice.clone(), sets, pc).unwrap();
     }
 }
