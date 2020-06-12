@@ -4,15 +4,14 @@ layout(location = 0) in vec3 v_normal;
 layout(location = 1) in vec2 v_tex_uv;
 layout(location = 2) in vec2 v_lightmap_uv;
 layout(location = 3) in vec3 v_lightgrid_uv;
+layout(location = 4) in vec3 v_worldpos;
 
 layout(location = 0) out vec4 f_color;
 
 layout(set = 1, binding = 0) uniform sampler2D mainTex;
 
 layout(push_constant) uniform PushConstantData {
-    vec2 unproj_scale;
-    vec2 unproj_offset;
-    mat4 view_transpose;
+    vec3 cam_pos;
     vec2 scroll;
     vec2 scale;
 } pc;
@@ -26,9 +25,8 @@ vec2 vec_to_latlng(vec3 v)
 }
 
 void main() {
-    // Convert pixel position to a view ray and transform it to world space
-    vec3 ray_eye = vec3(gl_FragCoord.xy * pc.unproj_scale + pc.unproj_offset, -1);
-    vec3 ray_world = mat3(pc.view_transpose) * ray_eye;
+    // Create a ray from the camera to the fragment's world-space position
+    vec3 ray_world = v_worldpos - pc.cam_pos;
 
     // Convert world-space ray to spherical coordinates for a skydome effect
     vec2 uv = vec_to_latlng(ray_world);

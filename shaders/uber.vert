@@ -5,10 +5,11 @@ layout(location = 1) in vec2 texture_coord;
 layout(location = 2) in vec2 lightmap_coord;
 layout(location = 3) in vec3 normal;
 
-layout(location = 0) out vec3 v_normal;
+layout(location = 0) out vec3 v_normal; // World-space normal
 layout(location = 1) out vec2 v_tex_uv;
 layout(location = 2) out vec2 v_lightmap_uv;
 layout(location = 3) out vec3 v_lightgrid_uv;
+layout(location = 4) out vec3 v_worldpos;
 
 layout(set = 0, binding = 0) uniform Data {
     mat4 model;
@@ -18,10 +19,11 @@ layout(set = 0, binding = 0) uniform Data {
 } uniforms;
 
 void main() {
-    mat4 modelview = uniforms.view * uniforms.model;
-    gl_Position = uniforms.proj * modelview * vec4(position, 1.0);
-    v_normal = transpose(inverse(mat3(uniforms.model))) * normal;   // World-space normal
+    vec4 worldpos = uniforms.model * vec4(position, 1.0);
+    gl_Position = uniforms.proj * uniforms.view * worldpos;
+    v_normal = transpose(inverse(mat3(uniforms.model))) * normal;
     v_tex_uv = texture_coord;
     v_lightmap_uv = lightmap_coord;
-    v_lightgrid_uv = (uniforms.lightgrid * uniforms.model * vec4(position, 1.0)).xyz;
+    v_lightgrid_uv = (uniforms.lightgrid * worldpos).xyz;
+    v_worldpos = worldpos.xyz;
 }

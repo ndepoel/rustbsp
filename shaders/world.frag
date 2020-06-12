@@ -4,6 +4,7 @@ layout(location = 0) in vec3 v_normal;
 layout(location = 1) in vec2 v_tex_uv;
 layout(location = 2) in vec2 v_lightmap_uv;
 layout(location = 3) in vec3 v_lightgrid_uv;
+layout(location = 4) in vec3 v_worldpos;
 
 layout(location = 0) out vec4 f_color;
 

@@ -642,16 +642,12 @@ impl SurfaceRenderer for SkySurfaceRenderer
     {
         let sets = (uniforms.clone(), self.descriptor_set.clone());
         
-        let proj_matrix = camera.projection_matrix();
-        let xmax = 1.0 / proj_matrix[0][0];
-        let ymax = 1.0 / proj_matrix[1][1];
         let pc = sky_fs::ty::PushConstantData
         {
-            unproj_scale: [2.0 * xmax / camera.width(), 2.0 * ymax / camera.height()],
-            unproj_offset: [-xmax, -ymax],
-            view_transpose: camera.view_matrix().transpose().into(),
+            cam_pos: camera.position.into(),
             scroll: [0.05 * camera.time, 0.1 * camera.time],
             scale: [3.0, 2.0],
+            _dummy0: Default::default(),
         };
 
         builder.draw_indexed(self.pipeline.clone(), &dynamic_state, vec!(self.vertex_slice.clone()), self.index_slice.clone(), sets, pc).unwrap();
