@@ -4,14 +4,13 @@ layout(location = 0) in vec3 v_normal;
 layout(location = 1) in vec2 v_tex_uv;
 layout(location = 2) in vec2 v_lightmap_uv;
 layout(location = 3) in vec3 v_lightgrid_uv;
-layout(location = 4) in vec3 v_worldpos;
+layout(location = 4) in vec3 v_view_ray;
 
 layout(location = 0) out vec4 f_color;
 
 layout(set = 1, binding = 0) uniform sampler2D mainTex;
 
 layout(push_constant) uniform PushConstantData {
-    vec3 cam_pos;
     vec2 scroll;
     vec2 scale;
 } pc;
@@ -25,13 +24,10 @@ vec2 vec_to_latlng(vec3 v)
 }
 
 void main() {
-    // Create a ray from the camera to the fragment's world-space position
-    vec3 ray_world = v_worldpos - pc.cam_pos;
-
     // Convert world-space ray to spherical coordinates for a skydome effect
-    vec2 uv = vec_to_latlng(ray_world);
+    vec2 uv = vec_to_latlng(v_view_ray);
     
-    // Modify sky texture coords as specified by the textures/skies/tim_hell shader
+    // Modify sky texture coords to create a scrolling effect
     uv += pc.scroll;
     uv *= pc.scale;
 
