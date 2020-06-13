@@ -210,10 +210,12 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
 
     BspRenderer
     { 
-        device: device.clone(), queue: queue.clone(),
+        device: device.clone(),
+        queue: queue.clone(),
         world: world,
         pipelines: pipelines,
-        vertex_buffer: vertex_buffer.clone(), index_buffer: index_buffer.clone(),
+        vertex_buffer: vertex_buffer.clone(),
+        index_buffer: index_buffer.clone(),
         vs_uniform_buffer: Arc::new(vs_uniform_buffer),
         lightgrid_transform: lightgrid_transform,
         surface_renderers: surface_renderers,
@@ -342,7 +344,7 @@ fn load_lightmap_texture(queue: Arc<Queue>, lightmap: &bsp::Lightmap) -> Result<
     Ok(tex)
 }
 
-fn create_lightgrid_textures(queue: Arc<Queue>, dimensions: cgmath::Vector3::<usize>, light_volumes: &Vec<bsp::LightVolume>) -> Result<Vec<Arc<Texture>>, ImageCreationError>
+fn create_lightgrid_textures(queue: Arc<Queue>, dimensions: cgmath::Vector3::<usize>, light_volumes: &Vec<bsp::LightVolume>) -> Result<(Arc<Texture>, Arc<Texture>), ImageCreationError>
 {
     let (w, h, d) = dimensions.into();
     let grid_size = w * h * d;
@@ -373,7 +375,7 @@ fn create_lightgrid_textures(queue: Arc<Queue>, dimensions: cgmath::Vector3::<us
     let (tex_b, future) = ImmutableImage::from_iter(buf.iter().cloned(), Dimensions::Dim3d { width: w as u32, height: h as u32, depth: d as u32 }, Format::R8G8B8A8Unorm, queue.clone())?;
     future.flush().unwrap();
 
-    Ok(vec!(tex_a, tex_b))
+    Ok((tex_a, tex_b))
 }
 
 // This code is converted from the Quake 3 source. Turns out they *do* process the lighting data before loading it into textures,
@@ -401,7 +403,7 @@ fn color_shift_lighting(bytes: [u8; 3]) -> [u8; 3]
 fn create_surface_renderer(
     world: &bsp::World, surface: &bsp::Surface,
     queue: Arc<Queue>, sampler: Arc<Sampler>,
-    textures: &TextureArray, lightmaps: &TextureArray, lightgrid_textures: &TextureArray, fallback_tex: Arc<Texture>,
+    textures: &TextureArray, lightmaps: &TextureArray, lightgrid_textures: &(Arc<Texture>, Arc<Texture>), fallback_tex: Arc<Texture>,
     pipelines: &Pipelines, vertex_slice: Arc<VertexSlice>, index_slice: Arc<IndexSlice>) -> Result<Box<dyn SurfaceRenderer>, PersistentDescriptorSetBuildError>
 {
     match surface.surface_type
@@ -492,8 +494,8 @@ fn create_surface_renderer(
             let layout = pipeline.descriptor_set_layout(1).unwrap();
             let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
                 .add_sampled_image(textures.get(surface.texture_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
-                .add_sampled_image(lightgrid_textures[0].clone(), sampler.clone()).unwrap()
-                .add_sampled_image(lightgrid_textures[1].clone(), sampler.clone()).unwrap()
+                .add_sampled_image(lightgrid_textures.0.clone(), sampler.clone()).unwrap()
+                .add_sampled_image(lightgrid_textures.1.clone(), sampler.clone()).unwrap()
                 .build()?);
 
             Ok(Box::new(MeshSurfaceRenderer
