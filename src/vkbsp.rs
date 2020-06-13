@@ -9,7 +9,7 @@ use vulkano::
     framebuffer::{ FramebufferAbstract, Subpass, RenderPassAbstract },
     sync::GpuFuture,
     descriptor::{ DescriptorSet, PipelineLayoutAbstract },
-    descriptor::descriptor_set::{ DescriptorSetsCollection, PersistentDescriptorSet },
+    descriptor::descriptor_set::{ DescriptorSetsCollection, PersistentDescriptorSet, PersistentDescriptorSetBuildError },
     image::{ ImmutableImage, Dimensions, traits::ImageViewAccess, sys::ImageCreationError },
     format::{ Format },
     sampler::{ Sampler, SamplerAddressMode, Filter, MipmapMode },
@@ -102,6 +102,11 @@ struct Pipelines
     sky: Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
 }
 
+type VertexSlice = BufferSlice<[bsp::Vertex], Arc<ImmutableBuffer<[bsp::Vertex]>>>;
+type IndexSlice = BufferSlice<[u32], Arc<ImmutableBuffer<[u32]>>>;
+type Texture = dyn ImageViewAccess + Send + Sync;
+type TextureArray = Vec<Arc<Texture>>;
+
 trait SurfaceRenderer
 {
     fn draw_surface(&self, builder: &mut AutoCommandBufferBuilder, camera: &vkcore::Camera, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>);
@@ -116,8 +121,8 @@ struct PlanarSurfaceRenderer
     pipeline: Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
 
     // These type designations are NOT nice, but using a BufferAccess trait here didn't cut it
-    vertex_slice: Arc<BufferSlice<[bsp::Vertex], Arc<ImmutableBuffer<[bsp::Vertex]>>>>,
-    index_slice: Arc<BufferSlice<[u32], Arc<ImmutableBuffer<[u32]>>>>,
+    vertex_slice: Arc<VertexSlice>,
+    index_slice: Arc<IndexSlice>,
 
     descriptor_set: Arc<dyn DescriptorSet + Sync + Send>,
 }
@@ -125,7 +130,7 @@ struct PlanarSurfaceRenderer
 struct PatchSurfaceRenderer
 {
     pipeline: Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
-    vertex_slice: Arc<BufferSlice<[bsp::Vertex], Arc<ImmutableBuffer<[bsp::Vertex]>>>>,
+    vertex_slice: Arc<VertexSlice>,
     index_buffer: Arc<ImmutableBuffer<[u32]>>,  // This renderer has its own index buffer, to break apart the surface into separate patches of 9 vertices each
     descriptor_set: Arc<dyn DescriptorSet + Sync + Send>,
 }
@@ -133,8 +138,8 @@ struct PatchSurfaceRenderer
 struct SkySurfaceRenderer
 {
     pipeline: Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
-    vertex_slice: Arc<BufferSlice<[bsp::Vertex], Arc<ImmutableBuffer<[bsp::Vertex]>>>>,
-    index_slice: Arc<BufferSlice<[u32], Arc<ImmutableBuffer<[u32]>>>>,
+    vertex_slice: Arc<VertexSlice>,
+    index_slice: Arc<IndexSlice>,
     descriptor_set: Arc<dyn DescriptorSet + Sync + Send>,
 }
 
@@ -185,7 +190,7 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
     let lightgrid_textures = create_lightgrid_textures(queue.clone(), dimensions, &world.light_volumes).unwrap();
     let lightgrid_transform = cgmath::Matrix4::from_nonuniform_scale(lightgrid_scale.x, lightgrid_scale.y, lightgrid_scale.z) * cgmath::Matrix4::from_translation(lightgrid_offset);
 
-    let mut surface_renderers = Vec::<Box<dyn SurfaceRenderer>>::with_capacity(world.surfaces.len());
+    let mut surface_renderers = Vec::with_capacity(world.surfaces.len());
     for surface in &world.surfaces
     {
         let start_vert = surface.first_vertex as usize;
@@ -195,113 +200,12 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
         let vertex_slice = Arc::new(BufferSlice::from_typed_buffer_access(vertex_buffer.clone()).slice(start_vert .. end_vert).unwrap());
         let index_slice = Arc::new(BufferSlice::from_typed_buffer_access(index_buffer.clone()).slice(start_index .. end_index).unwrap());
 
-        surface_renderers.push(
-        { 
-            match surface.surface_type
-            {
-                bsp::SurfaceType::Planar =>
-                {
-                    let flags = world.textures.get(surface.texture_id as usize).and_then(|t| Some(t.surface_flags)).unwrap_or(bsp::SurfaceFlags::empty());
-                    if flags.contains(bsp::SurfaceFlags::SKY)
-                    {
-                        let pipeline = &pipelines.sky;
-                        let layout = pipeline.descriptor_set_layout(1).unwrap();
-                        let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
-                            .add_sampled_image(textures.get(surface.texture_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
-                            .build().unwrap());
-
-                        Box::new(SkySurfaceRenderer
-                        {
-                            pipeline: pipeline.clone(),
-                            vertex_slice: vertex_slice.clone(),
-                            index_slice: index_slice.clone(),
-                            descriptor_set: descriptor_set.clone(),
-                        })
-                    }
-                    else
-                    {
-                        let pipeline = &pipelines.main;
-                        let layout = pipeline.descriptor_set_layout(1).unwrap();
-                        let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
-                            .add_sampled_image(textures.get(surface.texture_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
-                            .add_sampled_image(lightmaps.get(surface.lightmap_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
-                            .build().unwrap());
-
-                        Box::new(PlanarSurfaceRenderer
-                        {
-                            pipeline: pipeline.clone(),
-                            vertex_slice: vertex_slice.clone(),
-                            index_slice: index_slice.clone(),
-                            descriptor_set: descriptor_set.clone(),
-                        })
-                    }
-                },
-                bsp::SurfaceType::Patch =>
-                {
-                    // The vertex buffer from the BSP created above has all the vertices tightly packed with minimal duplication.
-                    // Vulkan's tessellation pipeline expects each patch to have a full set of 9 control points, so we have to generate an index list here to provide all of the control points in the right order.
-                    let index_buffer =
-                    {
-                        let mut patch_indices = Vec::new();
-                        let patch_count = cgmath::Vector2::new((surface.patch_size[0] - 1) / 2, (surface.patch_size[1] - 1) / 2);
-                        for y in 0..patch_count.y
-                        {
-                            for x in 0..patch_count.x
-                            {
-                                let start = 2 * y * surface.patch_size[0] + 2 * x;
-                                for i in 0..3
-                                {
-                                    for j in 0..3
-                                    {
-                                        patch_indices.push((start + i * surface.patch_size[0] + j) as u32);
-                                    }
-                                }
-                            }
-                        }
-
-                        let (buf, future) = ImmutableBuffer::from_iter(patch_indices.iter().cloned(), BufferUsage::index_buffer(), queue.clone()).unwrap();
-                        future.flush().unwrap();
-                        buf
-                    };
-
-                    let pipeline = &pipelines.patch;
-                    let layout = pipeline.descriptor_set_layout(1).unwrap();
-                    let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
-                        .add_sampled_image(textures.get(surface.texture_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
-                        .add_sampled_image(lightmaps.get(surface.lightmap_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
-                        .build().unwrap()
-                    );
-
-                    Box::new(PatchSurfaceRenderer
-                    {
-                        pipeline: pipeline.clone(),
-                        vertex_slice: vertex_slice.clone(),
-                        index_buffer: index_buffer.clone(),
-                        descriptor_set: descriptor_set.clone(),
-                    })
-                },
-                bsp::SurfaceType::Mesh =>
-                {
-                    let pipeline = &pipelines.model;
-                    let layout = pipeline.descriptor_set_layout(1).unwrap();
-                    let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
-                        .add_sampled_image(textures.get(surface.texture_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
-                        .add_sampled_image(lightgrid_textures[0].clone(), sampler.clone()).unwrap()
-                        .add_sampled_image(lightgrid_textures[1].clone(), sampler.clone()).unwrap()
-                        .build().unwrap()
-                    );
-
-                    Box::new(MeshSurfaceRenderer
-                    {
-                        pipeline: pipeline.clone(),
-                        vertex_slice: vertex_slice.clone(),
-                        index_slice: index_slice.clone(),
-                        descriptor_set: descriptor_set.clone(),
-                    })
-                },
-                _ => Box::new(NoopSurfaceRenderer {})
-            }
-        });
+        surface_renderers.push(create_surface_renderer(
+            &world, &surface,
+            queue.clone(), sampler.clone(), 
+            &textures, &lightmaps, &lightgrid_textures, fallback_tex.clone(), 
+            &pipelines, vertex_slice.clone(), index_slice.clone()
+        ).unwrap());
     }
 
     BspRenderer
@@ -384,14 +288,14 @@ fn create_pipelines(device: Arc<Device>, render_pass: Arc<dyn RenderPassAbstract
     })
 }
 
-fn create_fallback_texture(queue: Arc<Queue>) -> Result<Arc<dyn ImageViewAccess + Send + Sync>, ImageCreationError>
+fn create_fallback_texture(queue: Arc<Queue>) -> Result<Arc<Texture>, ImageCreationError>
 {
     let (tex, future) = ImmutableImage::from_iter([255u8, 255u8, 255u8, 255u8].iter().cloned(), Dimensions::Dim2d { width: 1, height: 1 }, Format::R8G8B8A8Unorm, queue.clone())?;
     future.flush().unwrap();
     Ok(tex)
 }
 
-fn load_texture(queue: Arc<Queue>, tex_name: &str) -> Result<Arc<dyn ImageViewAccess + Send + Sync>, ImageCreationError>
+fn load_texture(queue: Arc<Queue>, tex_name: &str) -> Result<Arc<Texture>, ImageCreationError>
 {
     let extensions = vec!("", "png", "tga", "jpg"); // Check PNG first so we can easily override Quake's TGA or JPG textures with our own substitutes
 
@@ -426,7 +330,7 @@ fn load_texture(queue: Arc<Queue>, tex_name: &str) -> Result<Arc<dyn ImageViewAc
     Ok(tex)
 }
 
-fn load_lightmap_texture(queue: Arc<Queue>, lightmap: &bsp::Lightmap) -> Result<Arc<dyn ImageViewAccess + Send + Sync>, ImageCreationError>
+fn load_lightmap_texture(queue: Arc<Queue>, lightmap: &bsp::Lightmap) -> Result<Arc<Texture>, ImageCreationError>
 {
     let img = ImageBuffer::from_fn(bsp::LIGHTMAP_WIDTH as u32, bsp::LIGHTMAP_HEIGHT as u32, |x,y| { Rgb(color_shift_lighting(lightmap.image[y as usize][x as usize])).to_rgba() });
     // Perform some image processing to clean up the lightmaps and make them look a bit sharper
@@ -438,7 +342,7 @@ fn load_lightmap_texture(queue: Arc<Queue>, lightmap: &bsp::Lightmap) -> Result<
     Ok(tex)
 }
 
-fn create_lightgrid_textures(queue: Arc<Queue>, dimensions: cgmath::Vector3::<usize>, light_volumes: &Vec<bsp::LightVolume>) -> Result<Vec<Arc<dyn ImageViewAccess + Send + Sync>>, ImageCreationError>
+fn create_lightgrid_textures(queue: Arc<Queue>, dimensions: cgmath::Vector3::<usize>, light_volumes: &Vec<bsp::LightVolume>) -> Result<Vec<Arc<Texture>>, ImageCreationError>
 {
     let (w, h, d) = dimensions.into();
     let grid_size = w * h * d;
@@ -492,6 +396,116 @@ fn color_shift_lighting(bytes: [u8; 3]) -> [u8; 3]
     }
 
     [r as u8, g as u8, b as u8]
+}
+
+fn create_surface_renderer(
+    world: &bsp::World, surface: &bsp::Surface,
+    queue: Arc<Queue>, sampler: Arc<Sampler>,
+    textures: &TextureArray, lightmaps: &TextureArray, lightgrid_textures: &TextureArray, fallback_tex: Arc<Texture>,
+    pipelines: &Pipelines, vertex_slice: Arc<VertexSlice>, index_slice: Arc<IndexSlice>) -> Result<Box<dyn SurfaceRenderer>, PersistentDescriptorSetBuildError>
+{
+    match surface.surface_type
+    {
+        bsp::SurfaceType::Planar =>
+        {
+            let flags = world.textures.get(surface.texture_id as usize).and_then(|t| Some(t.surface_flags)).unwrap_or(bsp::SurfaceFlags::empty());
+            if flags.contains(bsp::SurfaceFlags::SKY)
+            {
+                let pipeline = &pipelines.sky;
+                let layout = pipeline.descriptor_set_layout(1).unwrap();
+                let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
+                    .add_sampled_image(textures.get(surface.texture_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
+                    .build()?);
+
+                Ok(Box::new(SkySurfaceRenderer
+                {
+                    pipeline: pipeline.clone(),
+                    vertex_slice: vertex_slice.clone(),
+                    index_slice: index_slice.clone(),
+                    descriptor_set: descriptor_set.clone(),
+                }))
+            }
+            else
+            {
+                let pipeline = &pipelines.main;
+                let layout = pipeline.descriptor_set_layout(1).unwrap();
+                let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
+                    .add_sampled_image(textures.get(surface.texture_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
+                    .add_sampled_image(lightmaps.get(surface.lightmap_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
+                    .build()?);
+
+                Ok(Box::new(PlanarSurfaceRenderer
+                {
+                    pipeline: pipeline.clone(),
+                    vertex_slice: vertex_slice.clone(),
+                    index_slice: index_slice.clone(),
+                    descriptor_set: descriptor_set.clone(),
+                }))
+            }
+        },
+        bsp::SurfaceType::Patch =>
+        {
+            // The vertex buffer from the BSP created above has all the vertices tightly packed with minimal duplication.
+            // Vulkan's tessellation pipeline expects each patch to have a full set of 9 control points, so we have to generate an index list here to provide all of the control points in the right order.
+            let index_buffer =
+            {
+                let mut patch_indices = Vec::new();
+                let patch_count = cgmath::Vector2::new((surface.patch_size[0] - 1) / 2, (surface.patch_size[1] - 1) / 2);
+                for y in 0..patch_count.y
+                {
+                    for x in 0..patch_count.x
+                    {
+                        let start = 2 * y * surface.patch_size[0] + 2 * x;
+                        for i in 0..3
+                        {
+                            for j in 0..3
+                            {
+                                patch_indices.push((start + i * surface.patch_size[0] + j) as u32);
+                            }
+                        }
+                    }
+                }
+
+                let (buf, future) = ImmutableBuffer::from_iter(patch_indices.iter().cloned(), BufferUsage::index_buffer(), queue.clone()).unwrap();
+                future.flush().unwrap();
+                buf
+            };
+
+            let pipeline = &pipelines.patch;
+            let layout = pipeline.descriptor_set_layout(1).unwrap();
+            let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
+                .add_sampled_image(textures.get(surface.texture_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
+                .add_sampled_image(lightmaps.get(surface.lightmap_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
+                .build()?);
+
+            Ok(Box::new(PatchSurfaceRenderer
+            {
+                pipeline: pipeline.clone(),
+                vertex_slice: vertex_slice.clone(),
+                index_buffer: index_buffer.clone(),
+                descriptor_set: descriptor_set.clone(),
+            }))
+        },
+        bsp::SurfaceType::Mesh =>
+        {
+            let pipeline = &pipelines.model;
+            let layout = pipeline.descriptor_set_layout(1).unwrap();
+            let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
+                .add_sampled_image(textures.get(surface.texture_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
+                .add_sampled_image(lightgrid_textures[0].clone(), sampler.clone()).unwrap()
+                .add_sampled_image(lightgrid_textures[1].clone(), sampler.clone()).unwrap()
+                .build()?);
+
+            Ok(Box::new(MeshSurfaceRenderer
+            {
+                pipeline: pipeline.clone(),
+                vertex_slice: vertex_slice.clone(),
+                index_slice: index_slice.clone(),
+                descriptor_set: descriptor_set.clone(),
+            }))
+        },
+        _ => Ok(Box::new(NoopSurfaceRenderer {}))
+    }
 }
 
 impl vkcore::RendererAbstract for BspRenderer
