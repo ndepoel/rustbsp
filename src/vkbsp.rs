@@ -512,6 +512,24 @@ fn create_surface_renderer(
     }
 }
 
+struct RenderState
+{
+    drawn_surfaces: Vec<bool>,
+}
+
+impl RenderState
+{
+    fn new(num_surfaces: usize) -> Self
+    {
+        let mut drawn_surfaces = Vec::new();
+        drawn_surfaces.resize_with(num_surfaces, Default::default);
+        Self
+        {
+            drawn_surfaces: drawn_surfaces,
+        }
+    }
+}
+
 impl vkcore::RendererAbstract for BspRenderer
 {
     // This will probably morph into a function that returns a bunch of CommandBuffers to execute eventually
@@ -547,9 +565,8 @@ impl vkcore::RendererAbstract for BspRenderer
         builder.begin_render_pass(framebuffer.clone(), false, clear_values).unwrap();
 
         // Recursively draw the BSP tree starting at node 0, while keeping track of which surfaces have already been rendered.
-        let mut drawn_surfaces = Vec::new();
-        drawn_surfaces.resize_with(self.world.surfaces.len(), Default::default);
-        self.draw_node(0, camera, cam_leaf.cluster, &mut drawn_surfaces, &mut builder, dynamic_state, uniform_set.clone());
+        let mut render_state = RenderState::new(self.world.surfaces.len());
+        self.draw_node(0, camera, cam_leaf.cluster, &mut render_state, &mut builder, dynamic_state, uniform_set.clone());
 
         // Models are not part of the tree and need to be rendered separately.
         for model in self.world.models.iter().skip(1)   // Model 0 appears to be a special model containing ALL surfaces, which we clearly do not want to render
@@ -558,7 +575,7 @@ impl vkcore::RendererAbstract for BspRenderer
             let model_leaf = self.world.leaf_at_position((model.mins + model.maxs) * 0.5);
             if self.world.cluster_visible(cam_leaf.cluster, self.world.leafs[model_leaf].cluster)
             {
-                self.draw_model(model, camera, &mut drawn_surfaces, &mut builder, dynamic_state, uniform_set.clone());
+                self.draw_model(model, camera, &mut render_state, &mut builder, dynamic_state, uniform_set.clone());
             }
         }
 
@@ -569,7 +586,7 @@ impl vkcore::RendererAbstract for BspRenderer
 
 impl BspRenderer
 {
-    fn draw_node(&self, node_index: i32, camera: &vkcore::Camera, cluster: i32, drawn_surfaces: &mut Vec<bool>, builder: &mut AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
+    fn draw_node(&self, node_index: i32, camera: &vkcore::Camera, cluster: i32, render_state: &mut RenderState, builder: &mut AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
     {
         if node_index < 0
         {
@@ -577,7 +594,7 @@ impl BspRenderer
             let leaf = &self.world.leafs[leaf_index];
             if self.world.cluster_visible(cluster, leaf.cluster)
             {
-                self.draw_leaf(leaf, camera, drawn_surfaces, builder, dynamic_state, uniforms.clone());
+                self.draw_leaf(leaf, camera, render_state, builder, dynamic_state, uniforms.clone());
             }
             return;
         }
@@ -599,22 +616,22 @@ impl BspRenderer
             last = node.front;
         }
 
-        self.draw_node(first, camera, cluster, drawn_surfaces, builder, dynamic_state, uniforms.clone());
-        self.draw_node(last, camera, cluster, drawn_surfaces, builder, dynamic_state, uniforms.clone());
+        self.draw_node(first, camera, cluster, render_state, builder, dynamic_state, uniforms.clone());
+        self.draw_node(last, camera, cluster, render_state, builder, dynamic_state, uniforms.clone());
     }
 
-    fn draw_leaf(&self, leaf: &bsp::Leaf, camera: &vkcore::Camera, drawn_surfaces: &mut Vec<bool>, builder: &mut AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
+    fn draw_leaf(&self, leaf: &bsp::Leaf, camera: &vkcore::Camera, render_state: &mut RenderState, builder: &mut AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
     {
         for leaf_surf_index in leaf.first_surface..(leaf.first_surface + leaf.num_surfaces)
         {
             let surface_index = self.world.leaf_surfaces[leaf_surf_index as usize] as usize;
-            if drawn_surfaces[surface_index]
+            if render_state.drawn_surfaces[surface_index]
             {
                 // Make sure we draw each surface only once
                 continue;
             }
 
-            drawn_surfaces[surface_index] = true;
+            render_state.drawn_surfaces[surface_index] = true;
 
             let surface = &self.world.surfaces[surface_index];
             let texture = &self.world.textures[surface.texture_id as usize];
@@ -628,18 +645,18 @@ impl BspRenderer
         }
     }
 
-    fn draw_model(&self, model: &bsp::Model, camera: &vkcore::Camera, drawn_surfaces: &mut Vec<bool>, builder: &mut AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
+    fn draw_model(&self, model: &bsp::Model, camera: &vkcore::Camera, render_state: &mut RenderState, builder: &mut AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
     {
         for model_surf_index in model.first_surface..(model.first_surface + model.num_surfaces)
         {
             let surface_index = model_surf_index as usize;
-            if drawn_surfaces[surface_index]
+            if render_state.drawn_surfaces[surface_index]
             {
                 // Make sure we draw each surface only once
                 continue;
             }
 
-            drawn_surfaces[surface_index] = true;
+            render_state.drawn_surfaces[surface_index] = true;
 
             let renderer = &self.surface_renderers[surface_index];
             renderer.draw_surface(builder, camera, dynamic_state, uniforms.clone());
