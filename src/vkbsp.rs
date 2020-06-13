@@ -4,7 +4,7 @@ use vulkano::
 {
     device::{ Device, Queue },
     command_buffer::{ AutoCommandBufferBuilder, AutoCommandBuffer, DynamicState },
-    pipeline::{ GraphicsPipeline, GraphicsPipelineAbstract },
+    pipeline::{ GraphicsPipeline, GraphicsPipelineAbstract, GraphicsPipelineCreationError },
     buffer::{ BufferUsage, ImmutableBuffer, cpu_pool::CpuBufferPool, BufferSlice, BufferAccess },
     framebuffer::{ FramebufferAbstract, Subpass, RenderPassAbstract },
     sync::GpuFuture,
@@ -82,7 +82,8 @@ struct BspRenderer
 
     world: bsp::World,  // BspRenderer will take ownership of World
 
-    pipeline: Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
+    pipelines: Pipelines,
+    
     vertex_buffer: Arc<ImmutableBuffer<[bsp::Vertex]>>,
     index_buffer: Arc<ImmutableBuffer<[u32]>>,
 
@@ -91,6 +92,14 @@ struct BspRenderer
     lightgrid_transform: cgmath::Matrix4::<f32>,
 
     surface_renderers: Vec<Box<dyn SurfaceRenderer>>,
+}
+
+struct Pipelines
+{
+    main: Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
+    patch: Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
+    model: Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
+    sky: Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
 }
 
 trait SurfaceRenderer
@@ -134,6 +143,8 @@ type MeshSurfaceRenderer = PlanarSurfaceRenderer;   // At the moment these two w
 // We actually might want to pull the renderpass and framebuffer creation into here as well, to allow more flexibility in what and how we render. That's something for later though.
 pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderPassAbstract + Send + Sync>, world: bsp::World) -> impl vkcore::RendererAbstract
 {
+    let pipelines = create_pipelines(device.clone(), render_pass.clone()).unwrap();
+
     // We upload all of the BSP's vertices and indices to the GPU at once into one giant buffer. Draw calls for individual surfaces will use slices into these buffers.
     let vertex_buffer =
     { 
@@ -148,13 +159,6 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
         future.flush().unwrap();
         buf
     };
-
-    let vs = vs::Shader::load(device.clone()).unwrap();
-    let tcs = tcs::Shader::load(device.clone()).unwrap();
-    let tes = tes::Shader::load(device.clone()).unwrap();
-    let world_fs = world_fs::Shader::load(device.clone()).unwrap();
-    let model_fs = model_fs::Shader::load(device.clone()).unwrap();
-    let sky_fs = sky_fs::Shader::load(device.clone()).unwrap();
 
     let vs_uniform_buffer = CpuBufferPool::<vs::ty::Data>::new(device.clone(), BufferUsage::uniform_buffer());
 
@@ -181,61 +185,6 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
     let lightgrid_textures = create_lightgrid_textures(queue.clone(), dimensions, &world.light_volumes).unwrap();
     let lightgrid_transform = cgmath::Matrix4::from_nonuniform_scale(lightgrid_scale.x, lightgrid_scale.y, lightgrid_scale.z) * cgmath::Matrix4::from_translation(lightgrid_offset);
 
-    // A pipeline is sort of a description of a single material: it determines which shaders to use and sets up the static rendering parameters
-    // TODO create separate pipelines for planar surfaces, patches, meshes, sky
-    let pipeline = Arc::new(GraphicsPipeline::start()
-        .vertex_input_single_buffer::<bsp::Vertex>()
-        .vertex_shader(vs.main_entry_point(), ())
-        .triangle_list()
-        //.polygon_mode_line()
-        .cull_mode_front()
-        .viewports_dynamic_scissors_irrelevant(1)
-        .fragment_shader(world_fs.main_entry_point(), ())
-        .depth_stencil_simple_depth()
-        .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
-        .build(device.clone())
-        .unwrap());
-
-    let patch_pipeline = Arc::new(GraphicsPipeline::start()
-        .vertex_input_single_buffer::<bsp::Vertex>()
-        .vertex_shader(vs.main_entry_point(), ())
-        .tessellation_shaders(tcs.main_entry_point(), (), tes.main_entry_point(), ())
-        .patch_list(9)
-        //.polygon_mode_line()
-        .cull_mode_front()
-        .viewports_dynamic_scissors_irrelevant(1)
-        .fragment_shader(world_fs.main_entry_point(), ())
-        .depth_stencil_simple_depth()
-        .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
-        .build(device.clone())
-        .unwrap());
-
-    let model_pipeline = Arc::new(GraphicsPipeline::start()
-        .vertex_input_single_buffer::<bsp::Vertex>()
-        .vertex_shader(vs.main_entry_point(), ())
-        .triangle_list()
-        //.polygon_mode_line()
-        .cull_mode_front()
-        .viewports_dynamic_scissors_irrelevant(1)
-        .fragment_shader(model_fs.main_entry_point(), ())
-        .depth_stencil_simple_depth()
-        .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
-        .build(device.clone())
-        .unwrap());
-
-    let sky_pipeline = Arc::new(GraphicsPipeline::start()
-        .vertex_input_single_buffer::<bsp::Vertex>()
-        .vertex_shader(vs.main_entry_point(), ())
-        .triangle_list()
-        //.polygon_mode_line()
-        .cull_mode_front()
-        .viewports_dynamic_scissors_irrelevant(1)
-        .fragment_shader(sky_fs.main_entry_point(), ())
-        .depth_stencil_simple_depth()
-        .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
-        .build(device.clone())
-        .unwrap());
-
     let mut surface_renderers = Vec::<Box<dyn SurfaceRenderer>>::with_capacity(world.surfaces.len());
     for surface in &world.surfaces
     {
@@ -255,14 +204,15 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
                     let flags = world.textures.get(surface.texture_id as usize).and_then(|t| Some(t.surface_flags)).unwrap_or(bsp::SurfaceFlags::empty());
                     if flags.contains(bsp::SurfaceFlags::SKY)
                     {
-                        let layout = sky_pipeline.descriptor_set_layout(1).unwrap();
+                        let pipeline = &pipelines.sky;
+                        let layout = pipeline.descriptor_set_layout(1).unwrap();
                         let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
                             .add_sampled_image(textures.get(surface.texture_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
                             .build().unwrap());
 
                         Box::new(SkySurfaceRenderer
                         {
-                            pipeline: sky_pipeline.clone(),
+                            pipeline: pipeline.clone(),
                             vertex_slice: vertex_slice.clone(),
                             index_slice: index_slice.clone(),
                             descriptor_set: descriptor_set.clone(),
@@ -270,6 +220,7 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
                     }
                     else
                     {
+                        let pipeline = &pipelines.main;
                         let layout = pipeline.descriptor_set_layout(1).unwrap();
                         let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
                             .add_sampled_image(textures.get(surface.texture_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
@@ -313,7 +264,8 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
                         buf
                     };
 
-                    let layout = patch_pipeline.descriptor_set_layout(1).unwrap();
+                    let pipeline = &pipelines.patch;
+                    let layout = pipeline.descriptor_set_layout(1).unwrap();
                     let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
                         .add_sampled_image(textures.get(surface.texture_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
                         .add_sampled_image(lightmaps.get(surface.lightmap_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
@@ -322,7 +274,7 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
 
                     Box::new(PatchSurfaceRenderer
                     {
-                        pipeline: patch_pipeline.clone(),
+                        pipeline: pipeline.clone(),
                         vertex_slice: vertex_slice.clone(),
                         index_buffer: index_buffer.clone(),
                         descriptor_set: descriptor_set.clone(),
@@ -330,7 +282,8 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
                 },
                 bsp::SurfaceType::Mesh =>
                 {
-                    let layout = model_pipeline.descriptor_set_layout(1).unwrap();
+                    let pipeline = &pipelines.model;
+                    let layout = pipeline.descriptor_set_layout(1).unwrap();
                     let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
                         .add_sampled_image(textures.get(surface.texture_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
                         .add_sampled_image(lightgrid_textures[0].clone(), sampler.clone()).unwrap()
@@ -340,7 +293,7 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
 
                     Box::new(MeshSurfaceRenderer
                     {
-                        pipeline: model_pipeline.clone(),
+                        pipeline: pipeline.clone(),
                         vertex_slice: vertex_slice.clone(),
                         index_slice: index_slice.clone(),
                         descriptor_set: descriptor_set.clone(),
@@ -355,12 +308,80 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
     { 
         device: device.clone(), queue: queue.clone(),
         world: world,
-        pipeline: pipeline.clone(),
+        pipelines: pipelines,
         vertex_buffer: vertex_buffer.clone(), index_buffer: index_buffer.clone(),
         vs_uniform_buffer: Arc::new(vs_uniform_buffer),
         lightgrid_transform: lightgrid_transform,
         surface_renderers: surface_renderers,
     }
+}
+
+fn create_pipelines(device: Arc<Device>, render_pass: Arc<dyn RenderPassAbstract + Send + Sync>) -> Result<Pipelines, GraphicsPipelineCreationError>
+{
+    let vs = vs::Shader::load(device.clone()).unwrap();
+    let tcs = tcs::Shader::load(device.clone()).unwrap();
+    let tes = tes::Shader::load(device.clone()).unwrap();
+    let world_fs = world_fs::Shader::load(device.clone()).unwrap();
+    let model_fs = model_fs::Shader::load(device.clone()).unwrap();
+    let sky_fs = sky_fs::Shader::load(device.clone()).unwrap();
+
+    // A pipeline is sort of a description of a single material pass: it determines which shaders to use and sets up the static rendering parameters
+    let pipeline = Arc::new(GraphicsPipeline::start()
+        .vertex_input_single_buffer::<bsp::Vertex>()
+        .vertex_shader(vs.main_entry_point(), ())
+        .triangle_list()
+        //.polygon_mode_line()
+        .cull_mode_front()
+        .viewports_dynamic_scissors_irrelevant(1)
+        .fragment_shader(world_fs.main_entry_point(), ())
+        .depth_stencil_simple_depth()
+        .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
+        .build(device.clone())?);
+
+    let patch_pipeline = Arc::new(GraphicsPipeline::start()
+        .vertex_input_single_buffer::<bsp::Vertex>()
+        .vertex_shader(vs.main_entry_point(), ())
+        .tessellation_shaders(tcs.main_entry_point(), (), tes.main_entry_point(), ())
+        .patch_list(9)
+        //.polygon_mode_line()
+        .cull_mode_front()
+        .viewports_dynamic_scissors_irrelevant(1)
+        .fragment_shader(world_fs.main_entry_point(), ())
+        .depth_stencil_simple_depth()
+        .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
+        .build(device.clone())?);
+
+    let model_pipeline = Arc::new(GraphicsPipeline::start()
+        .vertex_input_single_buffer::<bsp::Vertex>()
+        .vertex_shader(vs.main_entry_point(), ())
+        .triangle_list()
+        //.polygon_mode_line()
+        .cull_mode_front()
+        .viewports_dynamic_scissors_irrelevant(1)
+        .fragment_shader(model_fs.main_entry_point(), ())
+        .depth_stencil_simple_depth()
+        .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
+        .build(device.clone())?);
+
+    let sky_pipeline = Arc::new(GraphicsPipeline::start()
+        .vertex_input_single_buffer::<bsp::Vertex>()
+        .vertex_shader(vs.main_entry_point(), ())
+        .triangle_list()
+        //.polygon_mode_line()
+        .cull_mode_front()
+        .viewports_dynamic_scissors_irrelevant(1)
+        .fragment_shader(sky_fs.main_entry_point(), ())
+        .depth_stencil_simple_depth()
+        .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
+        .build(device.clone())?);
+
+    Ok(Pipelines
+    {
+        main: pipeline.clone(),
+        patch: patch_pipeline.clone(),
+        model: model_pipeline.clone(),
+        sky: sky_pipeline.clone(),
+    })
 }
 
 fn create_fallback_texture(queue: Arc<Queue>) -> Result<Arc<dyn ImageViewAccess + Send + Sync>, ImageCreationError>
@@ -495,7 +516,7 @@ impl vkcore::RendererAbstract for BspRenderer
         };
 
         // For the uniform vertex data we need to update the descriptor set once every frame. This can be reused for all static objects.
-        let layout = self.pipeline.descriptor_set_layout(0).unwrap();
+        let layout = self.pipelines.main.descriptor_set_layout(0).unwrap();
         let uniform_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
             .add_buffer(uniforms.clone()).unwrap()
             .build().unwrap()

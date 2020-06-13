@@ -28,7 +28,7 @@ void main() {
     v_lightmap_uv = lightmap_coord;
     v_lightgrid_uv = (uniforms.lightgrid * worldpos).xyz;
 
-    // Transform the world position into view space, subtract the camera position from it (which is 0 in view space),
+    // Transform the vertex position into view space, subtract the camera position from it (which is 0 in view space),
     // giving the view ray in view space, then rotate the ray back to world space.
     v_view_ray = transpose(mat3(uniforms.view)) * viewpos.xyz;
 }
