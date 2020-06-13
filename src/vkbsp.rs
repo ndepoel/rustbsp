@@ -351,6 +351,7 @@ fn create_lightgrid_textures(queue: Arc<Queue>, dimensions: cgmath::Vector3::<us
     let mut buf = Vec::new();
     buf.resize_with(grid_size * 4, Default::default);
 
+    // The first 3D texture contains ambient light color values and the latitude part of the direction
     for i in 0..grid_size
     {
         let light_volume = &light_volumes[i];
@@ -363,6 +364,7 @@ fn create_lightgrid_textures(queue: Arc<Queue>, dimensions: cgmath::Vector3::<us
     let (tex_a, future) = ImmutableImage::from_iter(buf.iter().cloned(), Dimensions::Dim3d { width: w as u32, height: h as u32, depth: d as u32 }, Format::R8G8B8A8Unorm, queue.clone())?;
     future.flush().unwrap();
 
+    // The second 3D texture contains directional light color values and the longitude part of the direction
     for i in 0..grid_size
     {
         let light_volume = &light_volumes[i];
@@ -540,7 +542,7 @@ impl vkcore::RendererAbstract for BspRenderer
 
         // The command buffer contains the instructions to be executed to render things specifically for this frame:
         // a single draw call contains the pipeline (i.e. material) to use, the vertex buffer (and indices) to use, and the dynamic rendering parameters to be passed to the shaders.
-        let clear_values = vec!([0.1921, 0.3019, 0.4745, 1.0].into(), 1f32.into());
+        let clear_values = vec!([0.1921, 0.3019, 0.4745, 1.0].into(), (1f32, 1u32).into());
         let mut builder = AutoCommandBufferBuilder::primary_one_time_submit(self.device.clone(), self.queue.family()).unwrap();
         builder.begin_render_pass(framebuffer.clone(), false, clear_values).unwrap();
 

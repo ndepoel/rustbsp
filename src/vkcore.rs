@@ -221,18 +221,18 @@ pub fn init(world: bsp::World, entities: Vec<entity::Entity>, fullscreen: bool)
                 format: swapchain.format(),
                 samples: 1,
             },
-            depth:
+            depth_stencil:
             {
                 load: Clear,
                 store: DontCare,
-                format: Format::D16Unorm,
+                format: Format::D24Unorm_S8Uint,
                 samples: 1,
             }
         },
         pass:
         {
             color: [color],
-            depth_stencil: {depth}
+            depth_stencil: {depth_stencil}
         }
     ).unwrap());
 
@@ -387,7 +387,7 @@ fn window_size_dependent_setup(
     };
     dynamic_state.viewports = Some(vec!(viewport));
 
-    let depth_buffer = AttachmentImage::transient(device.clone(), dimensions, Format::D16Unorm).unwrap();
+    let depth_buffer = AttachmentImage::transient(device.clone(), dimensions, Format::D24Unorm_S8Uint).unwrap();
 
     // This seems to create and bind framebuffers to each of the swapchain images
     // For multi-pass rendering I guess we'd create multiple framebuffers, one for each pass, with size and format appropriate for that pass
