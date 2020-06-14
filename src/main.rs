@@ -13,6 +13,7 @@ use cgmath::Vector3;
 use image::{ImageBuffer, Rgb};
 
 mod bsp;
+mod parser;
 mod entity;
 mod vkcore;
 mod vkbsp;

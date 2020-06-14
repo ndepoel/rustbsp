@@ -1,7 +1,9 @@
 use std::str::Chars;
 use std::collections::HashMap;
 
-use cgmath::{Vector3, Zero};
+use cgmath::{ Vector3, Zero };
+
+use super::parser;
 
 #[derive(Debug)]
 pub struct Entity
@@ -21,90 +23,15 @@ impl Entity
 
     pub fn get_vector(&self, prop_name: &str) -> Option<Vector3::<f32>>
     {
-        self.properties.get(prop_name).and_then(|p| Some(parse_vector(p)))
+        self.properties.get(prop_name).and_then(|p| Some(parser::parse_vector(p)))
     }
-}
-
-fn next_token(chars: &mut Chars<'_>) -> Option<String>
-{
-    let mut item: Option<char>;
-
-    // Skip whitespace
-    loop
-    {
-        item = chars.next();
-        match item
-        {
-            Some(c) if c.is_whitespace() || c.is_ascii_control() => continue,
-            Some(_) => break,
-            None => return None,
-        }
-    }
-
-    let mut token = String::new();
-
-    if item.unwrap() == '\"'
-    {
-        // Handle quoted strings
-        loop
-        {
-            item = chars.next();
-
-            match item
-            {
-                Some('\"') => break,
-                Some(c) => token.push(c),
-                None => break,
-            }
-        }
-    }
-    else
-    {
-        // Handle single word
-        loop
-        {
-            match item
-            {
-                Some(c) if c.is_whitespace() || c.is_ascii_control() => break,
-                Some(c) => token.push(c),
-                None => break,
-            }
-
-            item = chars.next();
-        }
-    }
-
-    if token.len() > 0 { Some(token) } else { None }
-}
-
-pub fn tokenize(string: &str) -> Vec<String>
-{
-    let mut tokens = Vec::new();
-
-    let mut chars = string.chars();
-    while let Some(token) = next_token(&mut chars)
-    {
-        tokens.push(token);
-    }
-
-    tokens
-}
-
-fn parse_vector(string: &str) -> Vector3<f32>
-{
-    let mut chars = string.chars();
-    Vector3::new(
-        next_token(&mut chars).unwrap_or_default().parse::<f32>().unwrap_or_default(),
-        next_token(&mut chars).unwrap_or_default().parse::<f32>().unwrap_or_default(),
-        next_token(&mut chars).unwrap_or_default().parse::<f32>().unwrap_or_default(),
-    )
 }
 
 fn parse_entity(chars: &mut Chars<'_>) -> Option<Entity>
 {
     loop
     {
-        match next_token(chars)
+        match parser::next_token(chars)
         {
             Some(token) if token == "{" => break,
             Some(_) => continue,
@@ -115,10 +42,10 @@ fn parse_entity(chars: &mut Chars<'_>) -> Option<Entity>
     let mut entity = Entity::default();
     loop
     {
-        match next_token(chars)
+        match parser::next_token(chars)
         {
             Some(token) if token == "}" => break,
-            Some(key) => { entity.properties.insert(key, next_token(chars).unwrap_or_default()); },
+            Some(key) => { entity.properties.insert(key, parser::next_token(chars).unwrap_or_default()); },
             None => break,
         }
     }
@@ -130,7 +57,7 @@ fn parse_entity(chars: &mut Chars<'_>) -> Option<Entity>
 
     if let Some(origin) = entity.properties.remove("origin")
     {
-        entity.origin = parse_vector(&origin);
+        entity.origin = parser::parse_vector(&origin);
     }
 
     if let Some(angle) = entity.properties.remove("angle")
@@ -160,52 +87,6 @@ pub fn parse_entities(string: &str) -> Vec<Entity>
 mod tests
 {
     use super::*;
-
-    #[test]
-    fn test_tokenize()
-    {
-        // Test a mix of quoted strings, spaces, tabs, newlines, longer whitespaces, interior nuls, and trailing whitespace
-        let string = "This is \"a test\"   {  \tHello!   \0 \t\r\n   \"I am a longer quoted string\"   \"42 13.0 69\"     }\r\n\0".to_string();
-        let mut chars = string.chars();
-
-        assert_eq!(Some("This".to_string()), next_token(&mut chars));
-        assert_eq!(Some("is".to_string()), next_token(&mut chars));
-        assert_eq!(Some("a test".to_string()), next_token(&mut chars));
-        assert_eq!(Some("{".to_string()), next_token(&mut chars));
-        assert_eq!(Some("Hello!".to_string()), next_token(&mut chars));
-        assert_eq!(Some("I am a longer quoted string".to_string()), next_token(&mut chars));
-        assert_eq!(Some("42 13.0 69".to_string()), next_token(&mut chars));
-        assert_eq!(Some("}".to_string()), next_token(&mut chars));
-        assert_eq!(None, next_token(&mut chars));
-    }
-
-    #[test]
-    fn test_vector()
-    {
-        // Test a mix of integer and floating point string values
-        let vec = parse_vector("1 2.0 3.14");
-        assert_eq!(1.0, vec.x);
-        assert_eq!(2.0, vec.y);
-        assert_eq!(3.14, vec.z);
-
-        // Missing tokens should result in a default component value
-        let vec = parse_vector("4 5");
-        assert_eq!(4.0, vec.x);
-        assert_eq!(5.0, vec.y);
-        assert_eq!(0.0, vec.z);
-
-        // Empty strings should be accepted, result in a default vector
-        let vec = parse_vector("");
-        assert_eq!(0.0, vec.x);
-        assert_eq!(0.0, vec.y);
-        assert_eq!(0.0, vec.z);
-
-        // Test parse errors, invalid numbers should result in default values
-        let vec = parse_vector("a b c");
-        assert_eq!(0.0, vec.x);
-        assert_eq!(0.0, vec.y);
-        assert_eq!(0.0, vec.z);
-    }
 
     #[test]
     fn test_entity()
