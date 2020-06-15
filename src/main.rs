@@ -46,7 +46,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>>
     };
     println!("Map name: {}", map_name);
 
-    vkcore::init(world, entities, false);
+    vkcore::init(world, entities, shaders, false);
 
     Ok(())
 }

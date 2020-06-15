@@ -145,7 +145,11 @@ fn parse_texture_map(chars: &mut Chars<'_>) -> Option<TextureMap>
         match parser::next_token(chars)
         {
             Some(token) if token == "}" => break,
-            Some(key) if key.to_lowercase() == "map" || key.to_lowercase() == "clampmap" || key.to_lowercase() == "animmap" => texture.map = parser::next_token(chars).unwrap_or_default(),  // TODO: handle animated textures differently
+            Some(key) if key.to_lowercase() == "map" || key.to_lowercase() == "clampmap" => texture.map = parser::next_token(chars).unwrap_or_default(),
+            Some(key) if key.to_lowercase() == "animmap" => { 
+                let _count = parser::next_token(chars); // TODO: use count to actually parse that number of texture map names
+                texture.map = parser::next_token(chars).unwrap_or_default();
+            },
             Some(key) if key.to_lowercase() == "blendfunc" => texture.blend = parse_blend_func(chars),
             Some(key) if key.to_lowercase() == "alphafunc" => texture.mask = parse_alpha_func(chars),
             Some(_) => continue,

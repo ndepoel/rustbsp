@@ -19,11 +19,13 @@ use image::{ ImageBuffer, Rgb, Pixel };
 use std::sync::Arc;
 use std::ops::Deref;
 use std::path::PathBuf;
+use std::collections::HashMap;
 
 use cgmath::prelude::*;
 
 use super::vkcore;
 use super::bsp;
+use super::q3shader;
 
 vulkano::impl_vertex!(bsp::Vertex, position, texture_coord, lightmap_coord, normal);
 
@@ -146,7 +148,7 @@ struct SkySurfaceRenderer
 type MeshSurfaceRenderer = PlanarSurfaceRenderer;   // At the moment these two work identically, but conceptually I'd like to keep them distinct
 
 // We actually might want to pull the renderpass and framebuffer creation into here as well, to allow more flexibility in what and how we render. That's something for later though.
-pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderPassAbstract + Send + Sync>, world: bsp::World) -> impl vkcore::RendererAbstract
+pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderPassAbstract + Send + Sync>, world: bsp::World, shaders: HashMap<String, q3shader::Shader>) -> impl vkcore::RendererAbstract
 {
     let pipelines = create_pipelines(device.clone(), render_pass.clone()).unwrap();
 
@@ -175,9 +177,23 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
     let fallback_tex = create_fallback_texture(queue.clone()).unwrap();
 
     let mut textures = Vec::with_capacity(world.shaders.len());
-    for texture in &world.shaders
+    for shader in &world.shaders
     {
-        textures.push(load_texture(queue.clone(), texture.name()).unwrap());
+        textures.push(match shaders.get(shader.name())
+        {
+            Some(shader_def) => {
+                // Some textures are referenced through a shader definition
+                let texture_name = shader_def.textures.iter()
+                    .find(|tex| !tex.map.starts_with("$"))  // Skip things like $lightmap and $whiteimage
+                    .map_or(shader.name(), |tex| &tex.map);
+
+                load_texture(queue.clone(), texture_name).unwrap()
+            }
+            _ => {
+                // Some textures are referenced directly by their file name
+                load_texture(queue.clone(), shader.name()).unwrap()
+            }
+        });
     }
 
     let mut lightmaps = Vec::with_capacity(world.lightmaps.len());

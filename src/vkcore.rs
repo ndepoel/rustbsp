@@ -21,12 +21,14 @@ use vulkano_win::VkSurfaceBuild;
 use std::sync::Arc;
 use std::time::Instant;
 use std::f32::consts;
+use std::collections::HashMap;
 
 use cgmath::prelude::*;
 
 use super::vkbsp;
 use super::bsp;
 use super::entity;
+use super::q3shader;
 
 pub trait RendererAbstract
 {
@@ -127,7 +129,7 @@ impl Camera
     }
 }
 
-pub fn init(world: bsp::World, entities: Vec<entity::Entity>, fullscreen: bool)
+pub fn init(world: bsp::World, entities: Vec<entity::Entity>, shaders: HashMap<String, q3shader::Shader>, fullscreen: bool)
 {
     // Create the Vulkan instance with whatever is required to draw to a window
     let instance = 
@@ -242,7 +244,7 @@ pub fn init(world: bsp::World, entities: Vec<entity::Entity>, fullscreen: bool)
         None => (cgmath::Vector3::new(300.0, 40.0, 540.0), cgmath::Vector3::new(180.0, 0.0, 0.0))
     };
 
-    let renderer = vkbsp::init(device.clone(), queue.clone(), render_pass.clone(), world);
+    let renderer = vkbsp::init(device.clone(), queue.clone(), render_pass.clone(), world, shaders);
 
     // Create framebuffers from the images we created along with our swapchain
     let mut dynamic_state = DynamicState::none();
