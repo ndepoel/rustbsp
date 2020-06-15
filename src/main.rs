@@ -9,6 +9,7 @@ use std::fs::{ File, read_to_string };
 use std::env;
 use std::io::{ Error, ErrorKind };
 use std::io::prelude::*;
+use std::collections::HashMap;
 
 use cgmath::Vector3;
 use image::{ImageBuffer, Rgb};
@@ -50,9 +51,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>>
     Ok(())
 }
 
-fn read_shader_files(glob_pattern: &str) -> Result<Vec<q3shader::Shader>, Box::<dyn std::error::Error>>
+fn read_shader_files(glob_pattern: &str) -> Result<HashMap<String, q3shader::Shader>, Box::<dyn std::error::Error>>
 {
-    let mut shaders = Vec::new();
+    let mut shaders = HashMap::new();
     for entry in glob(glob_pattern)?
     {
         match entry
@@ -60,7 +61,7 @@ fn read_shader_files(glob_pattern: &str) -> Result<Vec<q3shader::Shader>, Box::<
             Ok(path) => 
             {
                 let text = read_to_string(path)?;
-                shaders.append(&mut q3shader::parse_shaders(&text));
+                shaders.extend(q3shader::parse_shaders(&text).drain());
             },
             _ => continue,
         }

@@ -1,4 +1,6 @@
 use std::str::Chars;
+use std::collections::HashMap;
+
 use cgmath::{ Vector2, Vector3 };
 
 use super::parser;
@@ -193,16 +195,16 @@ fn parse_shader(chars: &mut Chars<'_>) -> Option<Shader>
     Some(shader)
 }
 
-pub fn parse_shaders(string: &str) -> Vec<Shader>
+pub fn parse_shaders(string: &str) -> HashMap<String, Shader>
 {
-    let mut shaders = Vec::new();
+    let mut shaders = HashMap::new();
     let mut chars = string.chars();
 
     loop
     {
         match parse_shader(&mut chars)
         {
-            Some(shader) => shaders.push(shader),
+            Some(shader) => { shaders.insert(shader.name.clone(), shader); },
             None => return shaders,
         }
     }
