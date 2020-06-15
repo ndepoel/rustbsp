@@ -8,6 +8,7 @@ use image::{ ImageBuffer, Rgb, Pixel, ImageResult, DynamicImage, RgbaImage, Imag
 use image::imageops;
 
 use super::parser;
+use super::imageops2;
 
 #[derive(Debug, Default)]
 pub struct Shader
@@ -48,8 +49,10 @@ impl Shader
                 // Combine the two texture maps together. This is currently very crude, just replacing and alpha blending supported.
                 match tex.blend
                 {
-                    BlendMode::Opaque => { imageops::replace(composite.as_mut().unwrap(), &img, 0, 0); },
-                    _ => { imageops::overlay(composite.as_mut().unwrap(), &img, 0, 0); },
+                    BlendMode::Opaque => { imageops2::alpha_mask(composite.as_mut().unwrap(), &img, 0, 0); },
+                    BlendMode::Add => { imageops2::add(composite.as_mut().unwrap(), &img, 0, 0); },
+                    BlendMode::Multiply => { imageops2::multiply(composite.as_mut().unwrap(), &img, 0, 0); },
+                    BlendMode::AlphaBlend => { imageops::overlay(composite.as_mut().unwrap(), &img, 0, 0); },
                 };
             }
             else
