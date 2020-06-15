@@ -408,44 +408,41 @@ fn create_surface_renderer(
     textures: &TextureArray, lightmaps: &TextureArray, lightgrid_textures: &(Arc<Texture>, Arc<Texture>), fallback_tex: Arc<Texture>,
     pipelines: &Pipelines, vertex_slice: Arc<VertexSlice>, index_slice: Arc<IndexSlice>) -> Result<Box<dyn SurfaceRenderer>, PersistentDescriptorSetBuildError>
 {
+    let flags = world.textures.get(surface.texture_id as usize).and_then(|t| Some(t.surface_flags)).unwrap_or(bsp::SurfaceFlags::empty());
     match surface.surface_type
     {
+        bsp::SurfaceType::Planar if flags.contains(bsp::SurfaceFlags::SKY) =>
+        {
+            let pipeline = &pipelines.sky;
+            let layout = pipeline.descriptor_set_layout(1).unwrap();
+            let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
+                .add_sampled_image(textures.get(surface.texture_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
+                .build()?);
+
+            Ok(Box::new(SkySurfaceRenderer
+            {
+                pipeline: pipeline.clone(),
+                vertex_slice: vertex_slice.clone(),
+                index_slice: index_slice.clone(),
+                descriptor_set: descriptor_set.clone(),
+            }))
+        },
         bsp::SurfaceType::Planar =>
         {
-            let flags = world.textures.get(surface.texture_id as usize).and_then(|t| Some(t.surface_flags)).unwrap_or(bsp::SurfaceFlags::empty());
-            if flags.contains(bsp::SurfaceFlags::SKY)
-            {
-                let pipeline = &pipelines.sky;
-                let layout = pipeline.descriptor_set_layout(1).unwrap();
-                let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
-                    .add_sampled_image(textures.get(surface.texture_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
-                    .build()?);
+            let pipeline = &pipelines.main;
+            let layout = pipeline.descriptor_set_layout(1).unwrap();
+            let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
+                .add_sampled_image(textures.get(surface.texture_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
+                .add_sampled_image(lightmaps.get(surface.lightmap_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
+                .build()?);
 
-                Ok(Box::new(SkySurfaceRenderer
-                {
-                    pipeline: pipeline.clone(),
-                    vertex_slice: vertex_slice.clone(),
-                    index_slice: index_slice.clone(),
-                    descriptor_set: descriptor_set.clone(),
-                }))
-            }
-            else
+            Ok(Box::new(PlanarSurfaceRenderer
             {
-                let pipeline = &pipelines.main;
-                let layout = pipeline.descriptor_set_layout(1).unwrap();
-                let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
-                    .add_sampled_image(textures.get(surface.texture_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
-                    .add_sampled_image(lightmaps.get(surface.lightmap_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
-                    .build()?);
-
-                Ok(Box::new(PlanarSurfaceRenderer
-                {
-                    pipeline: pipeline.clone(),
-                    vertex_slice: vertex_slice.clone(),
-                    index_slice: index_slice.clone(),
-                    descriptor_set: descriptor_set.clone(),
-                }))
-            }
+                pipeline: pipeline.clone(),
+                vertex_slice: vertex_slice.clone(),
+                index_slice: index_slice.clone(),
+                descriptor_set: descriptor_set.clone(),
+            }))
         },
         bsp::SurfaceType::Patch =>
         {
