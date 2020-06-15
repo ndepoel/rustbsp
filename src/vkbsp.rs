@@ -184,7 +184,7 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
             Some(shader_def) => {
                 // Some textures are referenced through a shader definition
                 let texture_name = shader_def.textures.iter()
-                    .find(|tex| !tex.map.starts_with("$"))  // Skip things like $lightmap and $whiteimage
+                    .find(|tex| !tex.map.starts_with("$") && tex.tc_gen == q3shader::TexCoordGen::Base)  // Skip things like $lightmap and $whiteimage
                     .map_or(shader.name(), |tex| &tex.map);
 
                 load_texture(queue.clone(), texture_name).unwrap()

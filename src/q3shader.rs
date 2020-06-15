@@ -32,6 +32,8 @@ pub struct TextureMap
     pub map: String,
     pub blend: BlendMode,
     pub mask: AlphaMask,
+    pub tc_gen: TexCoordGen,
+    pub tc_mod: TexCoordModifier,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -63,22 +65,35 @@ impl Default for AlphaMask
 }
 
 #[derive(Debug)]
-pub struct TextureCoordModifier
+pub struct TexCoordModifier
 {
     pub scroll: Vector2<f32>,
     pub scale: Vector2<f32>,
 }
 
-impl Default for TextureCoordModifier
+impl Default for TexCoordModifier
 {
     fn default() -> Self
     {
-        Self
+        TexCoordModifier
         {
             scroll: Vector2::new(0.0, 0.0),
             scale: Vector2::new(1.0, 1.0),
         }
     }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum TexCoordGen
+{
+    Base,
+    Lightmap,
+    Environment,
+}
+
+impl Default for TexCoordGen
+{
+    fn default() -> Self { Self::Base }
 }
 
 fn parse_cull_mode(chars: &mut Chars<'_>) -> CullMode
@@ -136,6 +151,17 @@ fn parse_alpha_func(chars: &mut Chars<'_>) -> AlphaMask
     }
 }
 
+fn parse_tc_gen(chars: &mut Chars<'_>) -> TexCoordGen
+{
+    match parser::next_token(chars)
+    {
+        Some(token) if token.to_lowercase() == "base" => TexCoordGen::Base,
+        Some(token) if token.to_lowercase() == "lightmap" => TexCoordGen::Lightmap,
+        Some(token) if token.to_lowercase() == "environment" => TexCoordGen::Environment,
+        _ => TexCoordGen::default(),
+    }
+}
+
 fn parse_texture_map(chars: &mut Chars<'_>) -> Option<TextureMap>
 {
     let mut texture = TextureMap::default();
@@ -152,6 +178,7 @@ fn parse_texture_map(chars: &mut Chars<'_>) -> Option<TextureMap>
             },
             Some(key) if key.to_lowercase() == "blendfunc" => texture.blend = parse_blend_func(chars),
             Some(key) if key.to_lowercase() == "alphafunc" => texture.mask = parse_alpha_func(chars),
+            Some(key) if key.to_lowercase() == "tcgen" => texture.tc_gen = parse_tc_gen(chars),
             Some(_) => continue,
             None => break,
         }
@@ -244,6 +271,29 @@ mod tests
         }
     }";
 
+    const BLOCK: &str = "textures/gothic_floor/largerblock3b_ow
+    {
+    
+            {
+            map textures/sfx/firegorre.tga
+                    tcmod scroll 0 1
+                    tcMod turb 0 .25 0 1.6
+                    tcmod scale 4 4
+                    blendFunc GL_ONE GL_ZERO
+                    rgbGen identity
+        }
+        {
+                map textures/gothic_floor/largerblock3b_ow.tga
+            blendFunc GL_SRC_ALPHA GL_ONE_MINUS_SRC_ALPHA
+                rgbGen identity
+        }
+            {
+            map $lightmap
+                    blendFunc GL_DST_COLOR GL_ONE_MINUS_DST_ALPHA
+            rgbGen identity
+        }
+    }";
+
     #[test]
     fn test_alphamasked()
     {
@@ -261,6 +311,26 @@ mod tests
 
         assert_eq!("$lightmap", shader.textures[1].map);
         assert_eq!(BlendMode::Multiply, shader.textures[1].blend);
+        assert_eq!(AlphaMask::None, shader.textures[1].mask);
+    }
+
+    #[test]
+    fn test_multilayer()
+    {
+        let mut chars = BLOCK.chars();
+        let shdr = parse_shader(&mut chars);
+        assert!(shdr.is_some());
+        let shader = &shdr.unwrap();
+
+        assert_eq!(CullMode::Front, shader.cull);
+        assert_eq!(3, shader.textures.len());
+
+        assert_eq!("textures/sfx/firegorre.tga", shader.textures[0].map);
+        assert_eq!(BlendMode::Opaque, shader.textures[0].blend);
+        assert_eq!(AlphaMask::None, shader.textures[0].mask);
+
+        assert_eq!("textures/gothic_floor/largerblock3b_ow.tga", shader.textures[1].map);
+        assert_eq!(BlendMode::AlphaBlend, shader.textures[1].blend);
         assert_eq!(AlphaMask::None, shader.textures[1].mask);
     }
 }
