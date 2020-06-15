@@ -1,9 +1,11 @@
 use std::str::Chars;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::cmp::max;
 
 use cgmath::{ Vector2, Vector3 };
 use image::{ ImageBuffer, Rgb, Pixel, ImageResult, DynamicImage, RgbaImage, ImageError };
+use image::imageops;
 
 use super::parser;
 
@@ -19,11 +21,48 @@ impl Shader
 {
     pub fn load_image(&self) -> ImageResult<RgbaImage>
     {
-        let texture_name = self.textures.iter()
-            .find(|tex| !tex.map.starts_with("$") && tex.tc_gen == TexCoordGen::Base)  // Skip things like $lightmap and $whiteimage
-            .map_or(&self.name, |tex| &tex.map);
+        let mut iter = self.textures.iter();
+        let mut composite: Option<RgbaImage> = None;
+        while let Some(tex) = iter.next()
+        {
+            if tex.map.starts_with("$") || tex.tc_gen != TexCoordGen::Base
+            {
+                continue;
+            }
 
-        load_image_file(&texture_name)
+            let mut img = load_image_file(&tex.map)?;
+            let (w, h) = img.dimensions();
+
+            if composite.is_some()
+            {
+                // Make sure the two images match in size before compositing
+                let (cw, ch) = composite.as_ref().unwrap().dimensions();
+                if w != cw || h != ch
+                {
+                    let max_w = max(w, cw);
+                    let max_h = max(h, ch);
+                    img = imageops::resize(&img, max_w, max_h, imageops::FilterType::Triangle);
+                    composite = Some(imageops::resize(composite.as_ref().unwrap(), max_w, max_h, imageops::FilterType::Triangle));
+                }
+
+                // Combine the two texture maps together. This is currently very crude, just replacing and alpha blending supported.
+                match tex.blend
+                {
+                    BlendMode::Opaque => { imageops::replace(composite.as_mut().unwrap(), &img, 0, 0); },
+                    _ => { imageops::overlay(composite.as_mut().unwrap(), &img, 0, 0); },
+                };
+            }
+            else
+            {
+                composite = Some(img);
+            }
+        }
+
+        match composite
+        {
+            Some(image) => Ok(image),
+            _ => load_image_file(&self.name),
+        }
     }
 }
 
