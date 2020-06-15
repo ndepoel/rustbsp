@@ -13,7 +13,7 @@ use cgmath::prelude::*;
 enum LumpType
 {
     Entities,
-    Textures,
+    Shaders,
     Planes,
     Nodes,
     Leafs,
@@ -76,7 +76,7 @@ pub enum SurfaceType
 #[repr(C)]
 pub struct Surface
 {
-    pub texture_id: i32,
+    pub shader_id: i32,
     fog_id: i32,
     pub surface_type: SurfaceType,
     pub first_vertex: i32,
@@ -151,14 +151,14 @@ bitflags!
 }
 
 #[repr(C)]
-pub struct Texture
+pub struct Shader
 {
     name: [u8; 64], // Arrays are always fixed-size and have to be known at compile-time. Also #[derive(Debug)] only supports arrays up to 32 in length.
     pub surface_flags: SurfaceFlags,
     pub content_flags: ContentFlags,
 }
 
-impl Texture
+impl Shader
 {
     pub fn name(&self) -> &str
     {
@@ -231,7 +231,7 @@ pub struct Brush
 {
     first_side: i32,
     num_sides: i32,
-    texture_id: i32,
+    shader_id: i32,
 }
 
 #[derive(Debug)]
@@ -239,7 +239,7 @@ pub struct Brush
 pub struct BrushSide
 {
     plane_index: i32,
-    texture_id: i32,
+    shader_id: i32,
 }
 
 #[derive(Debug)]
@@ -310,7 +310,7 @@ pub struct World
 {
     pub vertices: Vec<Vertex>,
     pub surfaces: Vec<Surface>,
-    pub textures: Vec<Texture>,
+    pub shaders: Vec<Shader>,
     pub lightmaps: Vec<Lightmap>,
     pub nodes: Vec<Node>,
     pub leafs: Vec<Leaf>,
@@ -447,7 +447,7 @@ impl fmt::Display for World
     {
         writeln!(f, "{} vertices", self.vertices.len())?;
         writeln!(f, "{} surfaces", self.surfaces.len())?;
-        writeln!(f, "{} textures", self.textures.len())?;
+        writeln!(f, "{} shaders", self.shaders.len())?;
         writeln!(f, "{} lightmaps", self.lightmaps.len())?;
         writeln!(f, "{} nodes", self.nodes.len())?;
         writeln!(f, "{} leafs", self.leafs.len())?;
@@ -539,8 +539,6 @@ macro_rules! read_lump_str
 
 pub fn load_world(file: &mut File) -> std::io::Result<World>
 {
-    println!("Entities = {}, Textures = {}, MaxLumps = {}", LumpType::Entities as i32, LumpType::Textures as i32, LumpType::MaxLumps as i32);
-
     let header = read_struct!(file, Header);
     println!("{:?}", header);
 
@@ -561,8 +559,8 @@ pub fn load_world(file: &mut File) -> std::io::Result<World>
     let lump = &lumps[LumpType::Surfaces as usize];
     world.surfaces = read_lump_vec!(file, lump, Surface);
 
-    let lump = &lumps[LumpType::Textures as usize];
-    world.textures = read_lump_vec!(file, lump, Texture);
+    let lump = &lumps[LumpType::Shaders as usize];
+    world.shaders = read_lump_vec!(file, lump, Shader);
 
     let lump = &lumps[LumpType::Lightmaps as usize];
     world.lightmaps = read_lump_vec!(file, lump, Lightmap);

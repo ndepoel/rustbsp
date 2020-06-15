@@ -174,8 +174,8 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
 
     let fallback_tex = create_fallback_texture(queue.clone()).unwrap();
 
-    let mut textures = Vec::with_capacity(world.textures.len());
-    for texture in &world.textures
+    let mut textures = Vec::with_capacity(world.shaders.len());
+    for texture in &world.shaders
     {
         textures.push(load_texture(queue.clone(), texture.name()).unwrap());
     }
@@ -408,7 +408,7 @@ fn create_surface_renderer(
     textures: &TextureArray, lightmaps: &TextureArray, lightgrid_textures: &(Arc<Texture>, Arc<Texture>), fallback_tex: Arc<Texture>,
     pipelines: &Pipelines, vertex_slice: Arc<VertexSlice>, index_slice: Arc<IndexSlice>) -> Result<Box<dyn SurfaceRenderer>, PersistentDescriptorSetBuildError>
 {
-    let flags = world.textures.get(surface.texture_id as usize).and_then(|t| Some(t.surface_flags)).unwrap_or(bsp::SurfaceFlags::empty());
+    let flags = world.shaders.get(surface.shader_id as usize).and_then(|t| Some(t.surface_flags)).unwrap_or(bsp::SurfaceFlags::empty());
     match surface.surface_type
     {
         bsp::SurfaceType::Planar if flags.contains(bsp::SurfaceFlags::SKY) =>
@@ -416,7 +416,7 @@ fn create_surface_renderer(
             let pipeline = &pipelines.sky;
             let layout = pipeline.descriptor_set_layout(1).unwrap();
             let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
-                .add_sampled_image(textures.get(surface.texture_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
+                .add_sampled_image(textures.get(surface.shader_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
                 .build()?);
 
             Ok(Box::new(SkySurfaceRenderer
@@ -432,7 +432,7 @@ fn create_surface_renderer(
             let pipeline = &pipelines.main;
             let layout = pipeline.descriptor_set_layout(1).unwrap();
             let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
-                .add_sampled_image(textures.get(surface.texture_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
+                .add_sampled_image(textures.get(surface.shader_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
                 .add_sampled_image(lightmaps.get(surface.lightmap_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
                 .build()?);
 
@@ -475,7 +475,7 @@ fn create_surface_renderer(
             let pipeline = &pipelines.patch;
             let layout = pipeline.descriptor_set_layout(1).unwrap();
             let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
-                .add_sampled_image(textures.get(surface.texture_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
+                .add_sampled_image(textures.get(surface.shader_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
                 .add_sampled_image(lightmaps.get(surface.lightmap_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
                 .build()?);
 
@@ -492,7 +492,7 @@ fn create_surface_renderer(
             let pipeline = &pipelines.model;
             let layout = pipeline.descriptor_set_layout(1).unwrap();
             let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
-                .add_sampled_image(textures.get(surface.texture_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
+                .add_sampled_image(textures.get(surface.shader_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
                 .add_sampled_image(lightgrid_textures.0.clone(), sampler.clone()).unwrap()
                 .add_sampled_image(lightgrid_textures.1.clone(), sampler.clone()).unwrap()
                 .build()?);
@@ -631,7 +631,7 @@ impl BspRenderer
             render_state.drawn_surfaces[surface_index] = true;
 
             let surface = &self.world.surfaces[surface_index];
-            let texture = &self.world.textures[surface.texture_id as usize];
+            let texture = &self.world.shaders[surface.shader_id as usize];
             if texture.surface_flags.contains(bsp::SurfaceFlags::NODRAW) || texture.content_flags.intersects(bsp::ContentFlags::WATER | bsp::ContentFlags::FOG)
             {
                 continue;
