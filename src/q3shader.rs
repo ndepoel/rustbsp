@@ -92,6 +92,32 @@ pub fn load_image_file(tex_name: &str) -> ImageResult<RgbaImage>
     }
 }
 
+pub fn save_image_file(image: &RgbaImage, name: &str, is_masked: bool, overwrite: bool)
+{
+    let path = PathBuf::from(format!("export/{}", name)).with_extension("png");
+    if path.is_file() && !overwrite
+    {
+        return;
+    }
+
+    let dir = path.parent().unwrap();
+    if !dir.is_dir()
+    {
+        std::fs::create_dir_all(dir).unwrap();
+    }
+
+    println!("Saving composited texture to path: {}", path.to_string_lossy());
+    if is_masked
+    {
+        image.save(path).unwrap();
+    }
+    else
+    {
+        let rgb_img = image::DynamicImage::ImageRgba8(image.clone()).into_rgb();
+        rgb_img.save(path).unwrap();
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum CullMode
 {
