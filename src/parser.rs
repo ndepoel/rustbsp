@@ -51,7 +51,27 @@ pub fn next_token(chars: &mut Chars<'_>) -> Option<String>
         }
     }
 
+    // Skip comment lines and look for the next token
+    if token.starts_with("//")
+    {
+        skip_line(chars);
+        return next_token(chars);
+    }
+
     if token.len() > 0 { Some(token) } else { None }
+}
+
+fn skip_line(chars: &mut Chars<'_>)
+{
+    loop
+    {
+        let item = chars.next();
+        match item
+        {
+            Some(c) if c.is_ascii_control() => return,
+            _ => continue,
+        }
+    }
 }
 
 pub fn tokenize(string: &str) -> Vec<String>
