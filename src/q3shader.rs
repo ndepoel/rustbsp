@@ -1,7 +1,9 @@
 use std::str::Chars;
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use cgmath::{ Vector2, Vector3 };
+use image::{ ImageBuffer, Rgb, Pixel, ImageResult, DynamicImage, RgbaImage, ImageError };
 
 use super::parser;
 
@@ -11,6 +13,44 @@ pub struct Shader
     pub name: String,
     pub textures: Vec<TextureMap>,
     pub cull: CullMode,
+}
+
+impl Shader
+{
+    pub fn load_image(&self) -> ImageResult<RgbaImage>
+    {
+        let texture_name = self.textures.iter()
+            .find(|tex| !tex.map.starts_with("$") && tex.tc_gen == TexCoordGen::Base)  // Skip things like $lightmap and $whiteimage
+            .map_or(&self.name, |tex| &tex.map);
+
+        load_image_file(&texture_name)
+    }
+}
+
+pub fn load_image_file(tex_name: &str) -> ImageResult<RgbaImage>
+{
+    let extensions = vec!("", "png", "tga", "jpg"); // Check PNG first so we can easily override Quake's TGA or JPG textures with our own substitutes
+
+    let mut file_path = PathBuf::from(tex_name);
+    for ext in extensions.iter()
+    {
+        file_path = file_path.with_extension(ext);
+        if file_path.is_file()
+        {
+            break;
+        }
+    }
+
+    if file_path.is_file()
+    {
+        println!("Loading texture from file: {}", file_path.to_string_lossy());
+        Ok(image::open(file_path.to_str().unwrap())?.into_rgba())
+    }
+    else
+    {
+        println!("Could not load texture: {}", tex_name);
+        Err(ImageError::from(std::io::Error::new(std::io::ErrorKind::NotFound, "Could not find texture image file")))
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -172,8 +212,9 @@ fn parse_texture_map(chars: &mut Chars<'_>) -> Option<TextureMap>
         {
             Some(token) if token == "}" => break,
             Some(key) if key.to_lowercase() == "map" || key.to_lowercase() == "clampmap" => texture.map = parser::next_token(chars).unwrap_or_default(),
-            Some(key) if key.to_lowercase() == "animmap" => { 
-                let _count = parser::next_token(chars); // TODO: use count to actually parse that number of texture map names
+            Some(key) if key.to_lowercase() == "animmap" =>
+            { 
+                let _freq = parser::next_token(chars).unwrap_or_default().parse::<f32>().unwrap_or_default();
                 texture.map = parser::next_token(chars).unwrap_or_default();
             },
             Some(key) if key.to_lowercase() == "blendfunc" => texture.blend = parse_blend_func(chars),
@@ -298,9 +339,9 @@ mod tests
     fn test_alphamasked()
     {
         let mut chars = GIRDERS.chars();
-        let shdr = parse_shader(&mut chars);
-        assert!(shdr.is_some());
-        let shader = &shdr.unwrap();
+        let sh = parse_shader(&mut chars);
+        assert!(sh.is_some());
+        let shader = &sh.unwrap();
 
         assert_eq!(CullMode::None, shader.cull);
 
@@ -318,9 +359,9 @@ mod tests
     fn test_multilayer()
     {
         let mut chars = BLOCK.chars();
-        let shdr = parse_shader(&mut chars);
-        assert!(shdr.is_some());
-        let shader = &shdr.unwrap();
+        let sh = parse_shader(&mut chars);
+        assert!(sh.is_some());
+        let shader = &sh.unwrap();
 
         assert_eq!(CullMode::Front, shader.cull);
         assert_eq!(3, shader.textures.len());

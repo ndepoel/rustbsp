@@ -14,7 +14,7 @@ use vulkano::
     format::{ Format },
     sampler::{ Sampler, SamplerAddressMode, Filter, MipmapMode },
 };
-use image::{ ImageBuffer, Rgb, Pixel };
+use image::{ ImageBuffer, Rgb, Pixel, RgbaImage };
 
 use std::sync::Arc;
 use std::ops::Deref;
@@ -183,15 +183,15 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
         {
             Some(shader_def) => {
                 // Some textures are referenced through a shader definition
-                let texture_name = shader_def.textures.iter()
-                    .find(|tex| !tex.map.starts_with("$") && tex.tc_gen == q3shader::TexCoordGen::Base)  // Skip things like $lightmap and $whiteimage
-                    .map_or(shader.name(), |tex| &tex.map);
-
-                load_texture(queue.clone(), texture_name).unwrap()
+                match shader_def.load_image()
+                {
+                    Ok(img) => load_texture(queue.clone(), img).unwrap(),
+                    _ => load_texture_file(queue.clone(), shader.name()).unwrap()
+                }
             }
             _ => {
                 // Some textures are referenced directly by their file name
-                load_texture(queue.clone(), shader.name()).unwrap()
+                load_texture_file(queue.clone(), shader.name()).unwrap()
             }
         });
     }
@@ -313,39 +313,25 @@ fn create_fallback_texture(queue: Arc<Queue>) -> Result<Arc<Texture>, ImageCreat
     Ok(tex)
 }
 
-fn load_texture(queue: Arc<Queue>, tex_name: &str) -> Result<Arc<Texture>, ImageCreationError>
+fn load_texture(queue: Arc<Queue>, img: RgbaImage) -> Result<Arc<Texture>, ImageCreationError>
 {
-    let extensions = vec!("", "png", "tga", "jpg"); // Check PNG first so we can easily override Quake's TGA or JPG textures with our own substitutes
+    // let (w, h) = img.dimensions();
+    // let img = image::imageops::resize(&img, w * 4, h * 4, image::imageops::FilterType::Lanczos3);
+    // let img = image::imageops::unsharpen(&img, 0.7, 2);
 
-    let mut file_path = PathBuf::from(tex_name);
-    for ext in extensions.iter()
-    {
-        file_path = file_path.with_extension(ext);
-        if file_path.is_file()
-        {
-            break;
-        }
-    }
-
-    let (tex, future) = if file_path.is_file()
-    {
-        println!("Loading texture from file: {}", file_path.to_string_lossy());
-        let img = image::open(file_path.to_str().unwrap()).unwrap().into_rgba();
-        // let (w, h) = img.dimensions();
-        // let img = image::imageops::resize(&img, w * 4, h * 4, image::imageops::FilterType::Lanczos3);
-        // let img = image::imageops::unsharpen(&img, 0.7, 2);
-        let (w, h) = img.dimensions();
-        ImmutableImage::from_iter(img.into_raw().iter().cloned(), Dimensions::Dim2d { width: w, height: h }, Format::R8G8B8A8Unorm, queue.clone())?
-    }
-    else
-    {
-        println!("Could not load texture: {}", tex_name);
-        let placeholder = [255u8, 255u8, 255u8, 255u8];
-        ImmutableImage::from_iter(placeholder.iter().cloned(), Dimensions::Dim2d { width: 1, height: 1 }, Format::R8G8B8A8Unorm, queue.clone())?
-    };
-
+    let (w, h) = img.dimensions();
+    let (tex, future) = ImmutableImage::from_iter(img.into_raw().iter().cloned(), Dimensions::Dim2d { width: w, height: h }, Format::R8G8B8A8Unorm, queue.clone())?;
     future.flush().unwrap();
     Ok(tex)
+}
+
+fn load_texture_file(queue: Arc<Queue>, tex_name: &str) -> Result<Arc<Texture>, ImageCreationError>
+{
+    match q3shader::load_image_file(tex_name)
+    {
+        Ok(img) => load_texture(queue.clone(), img),
+        Err(_) => create_fallback_texture(queue.clone()),
+    }
 }
 
 fn load_lightmap_texture(queue: Arc<Queue>, lightmap: &bsp::Lightmap) -> Result<Arc<Texture>, ImageCreationError>
