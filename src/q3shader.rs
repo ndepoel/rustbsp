@@ -72,12 +72,11 @@ impl Shader
 
     pub fn is_transparent(&self) -> bool
     {
-        // If the first 'proper' texture layer has blending or masking attributes, the shader is considered transparent
+        // If the first visible texture layer has blending or masking attributes, the shader is considered transparent
         let mut iter = self.textures.iter();
         while let Some(tex) = iter.next()
         {
-            // Skip environment maps and things like $lightmap
-            if tex.map.starts_with("$") || tex.tc_gen != TexCoordGen::Base { continue; }
+            if tex.blend == BlendMode::Ignore { continue; }
 
             return tex.blend != BlendMode::Opaque || tex.mask != AlphaMask::None;
         }
@@ -263,7 +262,6 @@ fn parse_blend_func(chars: &mut Chars<'_>) -> BlendMode
             Some(token) if token.to_lowercase() == "gl_one_minus_src_alpha" => BlendMode::AlphaBlend,
             _ => BlendMode::default(),
         },
-        Some(token) if token.to_lowercase() == "gl_one_minus_src_alpha" => BlendMode::AlphaBlend,
         _ => BlendMode::default(),
     }
 }

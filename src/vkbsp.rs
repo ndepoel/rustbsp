@@ -111,6 +111,7 @@ type TextureArray = Vec<Arc<Texture>>;
 
 trait SurfaceRenderer
 {
+    fn is_transparent(&self) -> bool;
     fn draw_surface(&self, builder: &mut AutoCommandBufferBuilder, camera: &vkcore::Camera, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>);
 }
 
@@ -127,6 +128,7 @@ struct PlanarSurfaceRenderer
     index_slice: Arc<IndexSlice>,
 
     descriptor_set: Arc<dyn DescriptorSet + Sync + Send>,
+    is_transparent: bool,
 }
 
 struct PatchSurfaceRenderer
@@ -217,7 +219,7 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
         let index_slice = Arc::new(BufferSlice::from_typed_buffer_access(index_buffer.clone()).slice(start_index .. end_index).unwrap());
 
         surface_renderers.push(create_surface_renderer(
-            &world, &surface,
+            &world, &surface, &shaders,
             queue.clone(), sampler.clone(), 
             &textures, &lightmaps, &lightgrid_textures, fallback_tex.clone(), 
             &pipelines, vertex_slice.clone(), index_slice.clone()
@@ -405,12 +407,15 @@ fn color_shift_lighting(bytes: [u8; 3]) -> [u8; 3]
 }
 
 fn create_surface_renderer(
-    world: &bsp::World, surface: &bsp::Surface,
+    world: &bsp::World, surface: &bsp::Surface, shaders: &HashMap<String, q3shader::Shader>,
     queue: Arc<Queue>, sampler: Arc<Sampler>,
     textures: &TextureArray, lightmaps: &TextureArray, lightgrid_textures: &(Arc<Texture>, Arc<Texture>), fallback_tex: Arc<Texture>,
     pipelines: &Pipelines, vertex_slice: Arc<VertexSlice>, index_slice: Arc<IndexSlice>) -> Result<Box<dyn SurfaceRenderer>, PersistentDescriptorSetBuildError>
 {
     let flags = world.shaders.get(surface.shader_id as usize).and_then(|t| Some(t.surface_flags)).unwrap_or(bsp::SurfaceFlags::empty());
+    let shader = world.shaders.get(surface.shader_id as usize).and_then(|s| shaders.get(s.name()));
+    let is_transparent = shader.as_ref().map(|s| s.is_transparent()).unwrap_or_default();
+
     match surface.surface_type
     {
         bsp::SurfaceType::Planar if flags.contains(bsp::SurfaceFlags::SKY) =>
@@ -444,6 +449,7 @@ fn create_surface_renderer(
                 vertex_slice: vertex_slice.clone(),
                 index_slice: index_slice.clone(),
                 descriptor_set: descriptor_set.clone(),
+                is_transparent: is_transparent,
             }))
         },
         bsp::SurfaceType::Patch =>
@@ -505,6 +511,7 @@ fn create_surface_renderer(
                 vertex_slice: vertex_slice.clone(),
                 index_slice: index_slice.clone(),
                 descriptor_set: descriptor_set.clone(),
+                is_transparent: is_transparent,
             }))
         },
         _ => Ok(Box::new(NoopSurfaceRenderer {}))
@@ -640,6 +647,12 @@ impl BspRenderer
             }
 
             let renderer = &self.surface_renderers[surface_index];
+            if renderer.is_transparent()
+            {
+                // TODO: add surface to transparents list
+                // continue;
+            }
+
             renderer.draw_surface(builder, camera, dynamic_state, uniforms.clone());
         }
     }
@@ -658,6 +671,12 @@ impl BspRenderer
             render_state.drawn_surfaces[surface_index] = true;
 
             let renderer = &self.surface_renderers[surface_index];
+            if renderer.is_transparent()
+            {
+                // TODO: add surface to transparents list
+                // continue;
+            }
+
             renderer.draw_surface(builder, camera, dynamic_state, uniforms.clone());
         }
     }
@@ -665,6 +684,8 @@ impl BspRenderer
 
 impl SurfaceRenderer for NoopSurfaceRenderer
 {
+    fn is_transparent(&self) -> bool { false }
+
     fn draw_surface(&self, _builder: &mut AutoCommandBufferBuilder, _camera: &vkcore::Camera, _dynamic_state: &mut DynamicState, _uniforms: Arc<dyn DescriptorSet + Sync + Send>)
     {
     }
@@ -672,6 +693,8 @@ impl SurfaceRenderer for NoopSurfaceRenderer
 
 impl SurfaceRenderer for PlanarSurfaceRenderer
 {
+    fn is_transparent(&self) -> bool { self.is_transparent }
+
     fn draw_surface(&self, builder: &mut AutoCommandBufferBuilder, _camera: &vkcore::Camera, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
     {
         // TODO Building secondary command buffers per surface or leaf would probably speed this up a whole lot => tried it, but you can't pass dynamic state or per-frame uniforms to a pre-built secondary command buffer :/
@@ -684,6 +707,8 @@ impl SurfaceRenderer for PlanarSurfaceRenderer
 
 impl SurfaceRenderer for PatchSurfaceRenderer
 {
+    fn is_transparent(&self) -> bool { false }
+
     fn draw_surface(&self, builder: &mut AutoCommandBufferBuilder, _camera: &vkcore::Camera, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
     {
         let sets = (uniforms.clone(), self.descriptor_set.clone());
@@ -693,6 +718,8 @@ impl SurfaceRenderer for PatchSurfaceRenderer
 
 impl SurfaceRenderer for SkySurfaceRenderer
 {
+    fn is_transparent(&self) -> bool { false }
+
     fn draw_surface(&self, builder: &mut AutoCommandBufferBuilder, camera: &vkcore::Camera, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
     {
         let sets = (uniforms.clone(), self.descriptor_set.clone());
