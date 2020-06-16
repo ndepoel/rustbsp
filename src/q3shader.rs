@@ -26,6 +26,7 @@ impl Shader
         let mut composite: Option<RgbaImage> = None;
         while let Some(tex) = iter.next()
         {
+            // Skip environment maps and things like $lightmap
             if tex.map.starts_with("$") || tex.tc_gen != TexCoordGen::Base
             {
                 continue;
@@ -66,6 +67,21 @@ impl Shader
             Some(image) => Ok(image),
             _ => load_image_file(&self.name),
         }
+    }
+
+    pub fn is_transparent(&self) -> bool
+    {
+        // If the first 'proper' texture layer has blending or masking attributes, the shader is considered transparent
+        let mut iter = self.textures.iter();
+        while let Some(tex) = iter.next()
+        {
+            // Skip environment maps and things like $lightmap
+            if tex.map.starts_with("$") || tex.tc_gen != TexCoordGen::Base { continue; }
+
+            return tex.blend != BlendMode::Opaque || tex.mask != AlphaMask::None;
+        }
+
+        false
     }
 }
 
