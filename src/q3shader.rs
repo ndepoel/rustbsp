@@ -54,6 +54,7 @@ impl Shader
                     BlendMode::Add => { imageops2::add(composite.as_mut().unwrap(), &img, 0, 0); },
                     BlendMode::Multiply => { imageops2::multiply(composite.as_mut().unwrap(), &img, 0, 0); },
                     BlendMode::AlphaBlend => { imageops::overlay(composite.as_mut().unwrap(), &img, 0, 0); },
+                    BlendMode::Ignore => { },
                 };
             }
             else
@@ -167,6 +168,7 @@ pub enum BlendMode
     Add,
     Multiply,
     AlphaBlend,
+    Ignore,
 }
 
 impl Default for BlendMode
@@ -239,27 +241,29 @@ fn parse_blend_func(chars: &mut Chars<'_>) -> BlendMode
         Some(token) if token.to_lowercase() == "add" => BlendMode::Add,
         Some(token) if token.to_lowercase() == "filter" => BlendMode::Multiply,
         Some(token) if token.to_lowercase() == "blend" => BlendMode::AlphaBlend,
+        Some(token) if token.to_lowercase() == "gl_add" => BlendMode::Add,
         Some(token) if token.to_lowercase() == "gl_one" => match parser::next_token(chars)
         {
             Some(token) if token.to_lowercase() == "gl_zero" => BlendMode::Opaque,
             Some(token) if token.to_lowercase() == "gl_one" => BlendMode::Add,
-            _ => BlendMode::default(),
+            _ => BlendMode::Opaque,
         },
         Some(token) if token.to_lowercase() == "gl_zero" => match parser::next_token(chars)
         {
             Some(token) if token.to_lowercase() == "gl_src_color" => BlendMode::Multiply,
-            _ => BlendMode::default(),
+            _ => BlendMode::Ignore,
         },
         Some(token) if token.to_lowercase() == "gl_dst_color" => match parser::next_token(chars)
         {
             Some(token) if token.to_lowercase() == "gl_zero" => BlendMode::Multiply,
-            _ => BlendMode::default(),
+            _ => BlendMode::Multiply,
         },
         Some(token) if token.to_lowercase() == "gl_src_alpha" => match parser::next_token(chars)
         {
             Some(token) if token.to_lowercase() == "gl_one_minus_src_alpha" => BlendMode::AlphaBlend,
             _ => BlendMode::default(),
         },
+        Some(token) if token.to_lowercase() == "gl_one_minus_src_alpha" => BlendMode::AlphaBlend,
         _ => BlendMode::default(),
     }
 }
