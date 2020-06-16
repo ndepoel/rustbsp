@@ -85,7 +85,7 @@ pub fn load_image_file(tex_name: &str) -> ImageResult<RgbaImage>
 
     if file_path.is_file()
     {
-        println!("Loading texture from file: {}", file_path.to_string_lossy());
+        //println!("Loading texture from file: {}", file_path.to_string_lossy());
         Ok(image::open(file_path.to_str().unwrap())?.into_rgba())
     }
     else
@@ -403,6 +403,43 @@ mod tests
         }
     }";
 
+    const COLUMN: &str = "//textures/gothic_trim/metalbase09_b_blocks15
+    //{              
+    //	{
+    //		map $lightmap
+    //		rgbGen identity
+    //	}
+    //
+    //
+    //       {
+    //		map textures/gothic_trim/metalbase09_b_blocks15.tga
+    //                blendFunc GL_dst_color GL_SRC_ALPHA
+    //		alphagen lightingspecular
+    //		rgbGen identity
+    //	}
+    //
+    //}
+    //
+    
+    textures/gothic_trim/column2c_trans
+    {
+        qer_editorimage textures/gothic_trim/column2c_test.tga
+        surfaceparm nonsolid
+        {
+            map $lightmap
+            rgbGen identity
+        
+        }
+        {
+            map textures/gothic_trim/column2c_test.tga  // End-of line comment
+            rgbGen identity
+            // Adding a random comment here
+            blendFunc GL_DST_COLOR GL_ZERO
+    
+        
+        }
+    }";
+
     #[test]
     fn test_alphamasked()
     {
@@ -441,5 +478,22 @@ mod tests
         assert_eq!("textures/gothic_floor/largerblock3b_ow.tga", shader.textures[1].map);
         assert_eq!(BlendMode::AlphaBlend, shader.textures[1].blend);
         assert_eq!(AlphaMask::None, shader.textures[1].mask);
+    }
+
+    #[test]
+    fn test_comments()
+    {
+        let mut chars = COLUMN.chars();
+        let sh = parse_shader(&mut chars);
+        assert!(sh.is_some());
+        let shader = &sh.unwrap();
+
+        assert_eq!("textures/gothic_trim/column2c_trans", shader.name);
+        assert_eq!(CullMode::Front, shader.cull);
+        assert_eq!(2, shader.textures.len());
+
+        assert_eq!("$lightmap", shader.textures[0].map);
+        assert_eq!("textures/gothic_trim/column2c_test.tga", shader.textures[1].map);
+        assert_eq!(BlendMode::Multiply, shader.textures[1].blend);
     }
 }

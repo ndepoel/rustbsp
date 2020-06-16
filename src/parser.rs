@@ -68,7 +68,7 @@ fn skip_line(chars: &mut Chars<'_>)
         let item = chars.next();
         match item
         {
-            Some(c) if c.is_ascii_control() => return,
+            Some(c) if c == '\r' || c == '\n' => return,
             _ => continue,
         }
     }
