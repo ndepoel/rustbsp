@@ -61,7 +61,7 @@ pub struct Vertex
     pub color: [u8; 4],
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i32)]
 pub enum SurfaceType
 {

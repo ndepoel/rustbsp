@@ -146,7 +146,7 @@ pub fn save_image_file(image: &RgbaImage, name: &str, is_masked: bool, overwrite
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CullMode
 {
     None,
@@ -169,7 +169,7 @@ pub struct TextureMap
     pub tc_mod: TexCoordModifier,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BlendMode
 {
     Opaque,
@@ -184,7 +184,7 @@ impl Default for BlendMode
     fn default() -> Self { Self::Opaque }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AlphaMask
 {
     None,
@@ -217,7 +217,7 @@ impl Default for TexCoordModifier
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TexCoordGen
 {
     Base,
