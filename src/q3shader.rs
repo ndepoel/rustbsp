@@ -72,15 +72,24 @@ impl Shader
 
     pub fn is_transparent(&self) -> bool
     {
-        // If the first visible texture layer has blending or masking attributes, the shader is considered transparent
+        // If the first visible texture layer has blending attributes, the shader is considered transparent
         let mut iter = self.textures.iter();
         while let Some(tex) = iter.next()
         {
             if tex.blend == BlendMode::Ignore { continue; }
-
-            return tex.blend != BlendMode::Opaque || tex.mask != AlphaMask::None;
+            return tex.blend != BlendMode::Opaque;
         }
+        false
+    }
 
+    pub fn is_alpha_masked(&self) -> bool
+    {
+        let mut iter = self.textures.iter();
+        while let Some(tex) = iter.next()
+        {
+            if tex.blend == BlendMode::Ignore { continue; }
+            return tex.mask != AlphaMask::None;
+        }
         false
     }
 }
@@ -245,23 +254,39 @@ fn parse_blend_func(chars: &mut Chars<'_>) -> BlendMode
         {
             Some(token) if token.to_lowercase() == "gl_zero" => BlendMode::Opaque,
             Some(token) if token.to_lowercase() == "gl_one" => BlendMode::Add,
+            // Some(token) => { println!("Unsupported blend mode: GL_ONE {}", token); BlendMode::Opaque },
             _ => BlendMode::Opaque,
         },
         Some(token) if token.to_lowercase() == "gl_zero" => match parser::next_token(chars)
         {
             Some(token) if token.to_lowercase() == "gl_src_color" => BlendMode::Multiply,
+            Some(token) if token.to_lowercase() == "gl_one" => BlendMode::Ignore,
+            // Some(token) => { println!("Unsupported blend mode: GL_ZERO {}", token); BlendMode::Ignore },
             _ => BlendMode::Ignore,
         },
         Some(token) if token.to_lowercase() == "gl_dst_color" => match parser::next_token(chars)
         {
             Some(token) if token.to_lowercase() == "gl_zero" => BlendMode::Multiply,
+            // Some(token) => { println!("Unsupported blend mode: GL_DST_COLOR {}", token); BlendMode::Multiply },
             _ => BlendMode::Multiply,
         },
+        Some(token) if token.to_lowercase() == "gl_one_minus_dst_color" => match parser::next_token(chars)
+        {
+            // Some(token) => { println!("Unsupported blend mode: GL_ONE_MINUS_DST_COLOR {}", token); BlendMode::Multiply },
+            _ => BlendMode::Multiply,
+        }
         Some(token) if token.to_lowercase() == "gl_src_alpha" => match parser::next_token(chars)
         {
             Some(token) if token.to_lowercase() == "gl_one_minus_src_alpha" => BlendMode::AlphaBlend,
+            // Some(token) => { println!("Unsupported blend mode: GL_SRC_ALPHA {}", token); BlendMode::default() },
             _ => BlendMode::default(),
         },
+        Some(token) if token.to_lowercase() == "gl_one_minus_src_alpha" => match parser::next_token(chars)
+        {
+            // Some(token) => { println!("Unsupported blend mode: GL_ONE_MINUS_SRC_ALPHA {}", token); BlendMode::default() },
+            _ => BlendMode::default(),
+        },
+        // Some(token) => { println!("Unsupported blend mode: {}", token); BlendMode::default() },
         _ => BlendMode::default(),
     }
 }
