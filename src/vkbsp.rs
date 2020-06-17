@@ -96,6 +96,16 @@ struct BspRenderer
     surface_renderers: Vec<Box<dyn SurfaceRenderer>>,
 }
 
+struct Shaders
+{
+    uber_vert: vs::Shader,
+    bezier_tesc: tcs::Shader,
+    bezier_tese: tes::Shader,
+    world_frag: world_fs::Shader,
+    model_frag: model_fs::Shader,
+    sky_frag: sky_fs::Shader,
+}
+
 struct Pipelines
 {
     main: Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
@@ -242,59 +252,62 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
 
 fn create_pipelines(device: Arc<Device>, render_pass: Arc<dyn RenderPassAbstract + Send + Sync>) -> Result<Pipelines, GraphicsPipelineCreationError>
 {
-    let vs = vs::Shader::load(device.clone()).unwrap();
-    let tcs = tcs::Shader::load(device.clone()).unwrap();
-    let tes = tes::Shader::load(device.clone()).unwrap();
-    let world_fs = world_fs::Shader::load(device.clone()).unwrap();
-    let model_fs = model_fs::Shader::load(device.clone()).unwrap();
-    let sky_fs = sky_fs::Shader::load(device.clone()).unwrap();
+    let shaders = Shaders
+    {
+        uber_vert: vs::Shader::load(device.clone()).unwrap(),
+        bezier_tesc: tcs::Shader::load(device.clone()).unwrap(),
+        bezier_tese: tes::Shader::load(device.clone()).unwrap(),
+        world_frag: world_fs::Shader::load(device.clone()).unwrap(),
+        model_frag: model_fs::Shader::load(device.clone()).unwrap(),
+        sky_frag: sky_fs::Shader::load(device.clone()).unwrap(),
+    };
 
     // A pipeline is sort of a description of a single material pass: it determines which shaders to use and sets up the static rendering parameters
     let pipeline = Arc::new(GraphicsPipeline::start()
         .vertex_input_single_buffer::<bsp::Vertex>()
-        .vertex_shader(vs.main_entry_point(), ())
+        .vertex_shader(shaders.uber_vert.main_entry_point(), ())
         .triangle_list()
         //.polygon_mode_line()
         .cull_mode_front()
         .viewports_dynamic_scissors_irrelevant(1)
-        .fragment_shader(world_fs.main_entry_point(), ())
+        .fragment_shader(shaders.world_frag.main_entry_point(), ())
         .depth_stencil_simple_depth()
         .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
         .build(device.clone())?);
 
     let patch_pipeline = Arc::new(GraphicsPipeline::start()
         .vertex_input_single_buffer::<bsp::Vertex>()
-        .vertex_shader(vs.main_entry_point(), ())
-        .tessellation_shaders(tcs.main_entry_point(), (), tes.main_entry_point(), ())
+        .vertex_shader(shaders.uber_vert.main_entry_point(), ())
+        .tessellation_shaders(shaders.bezier_tesc.main_entry_point(), (), shaders.bezier_tese.main_entry_point(), ())
         .patch_list(9)
         //.polygon_mode_line()
         .cull_mode_front()
         .viewports_dynamic_scissors_irrelevant(1)
-        .fragment_shader(world_fs.main_entry_point(), ())
+        .fragment_shader(shaders.world_frag.main_entry_point(), ())
         .depth_stencil_simple_depth()
         .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
         .build(device.clone())?);
 
     let model_pipeline = Arc::new(GraphicsPipeline::start()
         .vertex_input_single_buffer::<bsp::Vertex>()
-        .vertex_shader(vs.main_entry_point(), ())
+        .vertex_shader(shaders.uber_vert.main_entry_point(), ())
         .triangle_list()
         //.polygon_mode_line()
         .cull_mode_front()
         .viewports_dynamic_scissors_irrelevant(1)
-        .fragment_shader(model_fs.main_entry_point(), ())
+        .fragment_shader(shaders.model_frag.main_entry_point(), ())
         .depth_stencil_simple_depth()
         .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
         .build(device.clone())?);
 
     let sky_pipeline = Arc::new(GraphicsPipeline::start()
         .vertex_input_single_buffer::<bsp::Vertex>()
-        .vertex_shader(vs.main_entry_point(), ())
+        .vertex_shader(shaders.uber_vert.main_entry_point(), ())
         .triangle_list()
         //.polygon_mode_line()
         .cull_mode_front()
         .viewports_dynamic_scissors_irrelevant(1)
-        .fragment_shader(sky_fs.main_entry_point(), ())
+        .fragment_shader(shaders.sky_frag.main_entry_point(), ())
         .depth_stencil_simple_depth()
         .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
         .build(device.clone())?);
