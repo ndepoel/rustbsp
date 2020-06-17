@@ -13,6 +13,8 @@ layout(set = 1, binding = 1) uniform sampler3D lightgridTexA;
 layout(set = 1, binding = 2) uniform sampler3D lightgridTexB;
 
 layout(constant_id = 0) const bool alpha_mask = false;
+layout(constant_id = 1) const float alpha_offset = 0.0;
+layout(constant_id = 2) const bool alpha_invert = false;
 
 vec3 decode_latlng(float lat, float lng)
 {
@@ -21,8 +23,13 @@ vec3 decode_latlng(float lat, float lng)
 
 void main() {
     vec4 texColor = texture(mainTex, v_tex_uv);
-    if (alpha_mask && texColor.a < 0.5)
-        discard;
+    if (alpha_mask)
+    {
+        float alpha = texColor.a + alpha_offset;
+        if (alpha_invert) alpha = 1.0 - alpha;
+        if (alpha < 0.5)
+            discard;
+    }
 
     vec4 lightgridA = texture(lightgridTexA, v_lightgrid_uv);
     vec4 lightgridB = texture(lightgridTexB, v_lightgrid_uv);

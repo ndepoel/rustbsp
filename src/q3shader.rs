@@ -82,15 +82,15 @@ impl Shader
         false
     }
 
-    pub fn is_alpha_masked(&self) -> bool
+    pub fn alpha_mask(&self) -> AlphaMask
     {
         let mut iter = self.textures.iter();
         while let Some(tex) = iter.next()
         {
             if tex.blend == BlendMode::Ignore { continue; }
-            return tex.mask != AlphaMask::None;
+            return tex.mask;
         }
-        false
+        AlphaMask::None
     }
 }
 
@@ -196,6 +196,22 @@ pub enum AlphaMask
 impl Default for AlphaMask
 {
     fn default() -> Self { Self::None }
+}
+
+impl AlphaMask
+{
+    pub fn is_masked(self) -> bool { self != Self::None }
+
+    pub fn offset(self) -> f32 
+    {
+        match self
+        {
+            Self::Gt0 => 0.4999999,
+            _ => 0.0,
+        }
+    }
+
+    pub fn invert(self) -> bool { self == Self::Lt128 }
 }
 
 #[derive(Debug)]

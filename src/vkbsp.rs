@@ -489,14 +489,14 @@ impl Pipelines
     fn get(&mut self, surface: &bsp::Surface, surface_flags: bsp::SurfaceFlags, shader_def: Option<&q3shader::Shader>) -> Result<Arc<dyn GraphicsPipelineAbstract + Send + Sync>, GraphicsPipelineCreationError>
     {
         let cull = shader_def.map(|s| s.cull).unwrap_or_default();
-        let masked = shader_def.map(|s| s.is_alpha_masked()).unwrap_or_default();
+        let mask = shader_def.map(|s| s.alpha_mask()).unwrap_or_default();
         let transparent = shader_def.map(|s| s.is_transparent()).unwrap_or_default();
 
         let mut hasher = DefaultHasher::new();
         hasher.write_i32(surface.surface_type as i32);
         hasher.write_u8(surface_flags.contains(bsp::SurfaceFlags::SKY) as u8);
         hasher.write_i32(cull as i32);
-        hasher.write_u8(masked as u8);
+        hasher.write_i32(mask as i32);
         hasher.write_u8(transparent as u8);
         let hash = hasher.finish();
 
@@ -505,14 +505,14 @@ impl Pipelines
             Some(pipeline) => Ok(pipeline.clone()),
             None =>
             {
-                let pipeline = self.create(surface.surface_type, surface_flags, cull, masked, transparent)?;
+                let pipeline = self.create(surface.surface_type, surface_flags, cull, mask, transparent)?;
                 self.pipelines.insert(hash, pipeline.clone());
                 Ok(pipeline)
             }
         }
     }
 
-    fn create(&mut self, surface_type: bsp::SurfaceType, surface_flags: bsp::SurfaceFlags, cull: q3shader::CullMode, masked: bool, transparent: bool) -> Result<Arc<dyn GraphicsPipelineAbstract + Send + Sync>, GraphicsPipelineCreationError>
+    fn create(&mut self, surface_type: bsp::SurfaceType, surface_flags: bsp::SurfaceFlags, cull: q3shader::CullMode, mask: q3shader::AlphaMask, transparent: bool) -> Result<Arc<dyn GraphicsPipelineAbstract + Send + Sync>, GraphicsPipelineCreationError>
     {
         // First, setup the basic pipeline with all the standard attributes
         let builder = GraphicsPipeline::start()
@@ -549,14 +549,14 @@ impl Pipelines
             },
             bsp::SurfaceType::Planar =>
             {
-                let sc = world_fs::SpecializationConstants { alpha_mask: masked as u32 };
+                let sc = world_fs::SpecializationConstants { alpha_mask: mask.is_masked() as u32, alpha_offset: mask.offset(), alpha_invert: mask.invert() as u32 };
                 builder
                     .fragment_shader(self.shaders.world_frag.main_entry_point(), sc)
                     .build(self.device.clone())?
             },
             bsp::SurfaceType::Patch =>
             {
-                let sc = world_fs::SpecializationConstants { alpha_mask: masked as u32 };
+                let sc = world_fs::SpecializationConstants { alpha_mask: mask.is_masked() as u32, alpha_offset: mask.offset(), alpha_invert: mask.invert() as u32 };
                 builder
                     .tessellation_shaders(self.shaders.bezier_tesc.main_entry_point(), (), self.shaders.bezier_tese.main_entry_point(), ())
                     .patch_list(9)
@@ -565,7 +565,7 @@ impl Pipelines
             },
             bsp::SurfaceType::Mesh =>
             {
-                let sc = model_fs::SpecializationConstants { alpha_mask: masked as u32 };
+                let sc = model_fs::SpecializationConstants { alpha_mask: mask.is_masked() as u32, alpha_offset: mask.offset(), alpha_invert: mask.invert() as u32 };
                 builder
                     .fragment_shader(self.shaders.model_frag.main_entry_point(), sc)
                     .build(self.device.clone())?
