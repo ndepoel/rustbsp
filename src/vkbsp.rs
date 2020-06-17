@@ -5,6 +5,7 @@ use vulkano::
     device::{ Device, Queue },
     command_buffer::{ AutoCommandBufferBuilder, AutoCommandBuffer, DynamicState },
     pipeline::{ GraphicsPipeline, GraphicsPipelineAbstract, GraphicsPipelineCreationError },
+    pipeline::blend::{ AttachmentBlend, BlendOp, BlendFactor },
     buffer::{ BufferUsage, ImmutableBuffer, cpu_pool::CpuBufferPool, BufferSlice, BufferAccess },
     framebuffer::{ FramebufferAbstract, Subpass, RenderPassAbstract },
     sync::GpuFuture,
@@ -256,7 +257,7 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
 
 fn create_fallback_texture(queue: Arc<Queue>) -> Result<Arc<Texture>, ImageCreationError>
 {
-    let (tex, future) = ImmutableImage::from_iter([255u8, 255u8, 255u8, 255u8].iter().cloned(), Dimensions::Dim2d { width: 1, height: 1 }, Format::R8G8B8A8Unorm, queue.clone())?;
+    let (tex, future) = ImmutableImage::from_iter([255u8, 255u8, 255u8, 128u8].iter().cloned(), Dimensions::Dim2d { width: 1, height: 1 }, Format::R8G8B8A8Unorm, queue.clone())?;
     future.flush().unwrap();
     Ok(tex)
 }
@@ -467,7 +468,7 @@ fn create_surface_renderer(
 
 impl Pipelines
 {
-    fn init(device: Arc<Device>, render_pass: Arc<dyn RenderPassAbstract + Send + Sync>) -> Self
+    pub fn init(device: Arc<Device>, render_pass: Arc<dyn RenderPassAbstract + Send + Sync>) -> Self
     {
         Self
         {
@@ -486,18 +487,18 @@ impl Pipelines
         }
     }
 
-    fn get(&mut self, surface: &bsp::Surface, surface_flags: bsp::SurfaceFlags, shader_def: Option<&q3shader::Shader>) -> Result<Arc<dyn GraphicsPipelineAbstract + Send + Sync>, GraphicsPipelineCreationError>
+    pub fn get(&mut self, surface: &bsp::Surface, surface_flags: bsp::SurfaceFlags, shader_def: Option<&q3shader::Shader>) -> Result<Arc<dyn GraphicsPipelineAbstract + Send + Sync>, GraphicsPipelineCreationError>
     {
         let cull = shader_def.map(|s| s.cull).unwrap_or_default();
         let mask = shader_def.map(|s| s.alpha_mask()).unwrap_or_default();
-        let transparent = shader_def.map(|s| s.is_transparent()).unwrap_or_default();
+        let blend = shader_def.map(|s| s.blend_mode()).unwrap_or_default();
 
         let mut hasher = DefaultHasher::new();
         hasher.write_i32(surface.surface_type as i32);
         hasher.write_u8(surface_flags.contains(bsp::SurfaceFlags::SKY) as u8);
         hasher.write_i32(cull as i32);
         hasher.write_i32(mask as i32);
-        hasher.write_u8(transparent as u8);
+        hasher.write_i32(blend as i32);
         let hash = hasher.finish();
 
         match self.pipelines.get(&hash)
@@ -505,14 +506,14 @@ impl Pipelines
             Some(pipeline) => Ok(pipeline.clone()),
             None =>
             {
-                let pipeline = self.create(surface.surface_type, surface_flags, cull, mask, transparent)?;
+                let pipeline = self.create(surface.surface_type, surface_flags, cull, mask, blend)?;
                 self.pipelines.insert(hash, pipeline.clone());
                 Ok(pipeline)
             }
         }
     }
 
-    fn create(&mut self, surface_type: bsp::SurfaceType, surface_flags: bsp::SurfaceFlags, cull: q3shader::CullMode, mask: q3shader::AlphaMask, transparent: bool) -> Result<Arc<dyn GraphicsPipelineAbstract + Send + Sync>, GraphicsPipelineCreationError>
+    fn create(&mut self, surface_type: bsp::SurfaceType, surface_flags: bsp::SurfaceFlags, cull: q3shader::CullMode, mask: q3shader::AlphaMask, blend: q3shader::BlendMode) -> Result<Arc<dyn GraphicsPipelineAbstract + Send + Sync>, GraphicsPipelineCreationError>
     {
         // First, setup the basic pipeline with all the standard attributes
         let builder = GraphicsPipeline::start()
@@ -531,10 +532,13 @@ impl Pipelines
             q3shader::CullMode::Back => builder.cull_mode_back(),
         };
 
-        let builder = match transparent
+        let builder = match blend
         {
-            true => builder.blend_alpha_blending().depth_write(false),
-            false => builder.blend_pass_through().depth_write(true),
+            q3shader::BlendMode::Opaque => builder.blend_pass_through().depth_write(true),
+            q3shader::BlendMode::AlphaBlend => builder.blend_alpha_blending().depth_write(false),
+            q3shader::BlendMode::Add => builder.blend_collective(Self::add_blending()).depth_write(false),
+            q3shader::BlendMode::Multiply => builder.blend_collective(Self::multiply_blending()).depth_write(false),
+            q3shader::BlendMode::Ignore => builder.blend_collective(AttachmentBlend::ignore_source()).depth_write(false),
         };
 
         // Finally, attach the correct shaders to the pipeline.
@@ -575,11 +579,46 @@ impl Pipelines
 
         Ok(Arc::new(pipeline))
     }
+
+    #[inline]
+    fn add_blending() -> AttachmentBlend {
+        AttachmentBlend {
+            enabled: true,
+            color_op: BlendOp::Add,
+            color_source: BlendFactor::One,
+            color_destination: BlendFactor::One,
+            alpha_op: BlendOp::Add,
+            alpha_source: BlendFactor::One,
+            alpha_destination: BlendFactor::One,
+            mask_red: true,
+            mask_green: true,
+            mask_blue: true,
+            mask_alpha: true,
+        }
+    }
+
+    #[inline]
+    fn multiply_blending() -> AttachmentBlend {
+        AttachmentBlend {
+            enabled: true,
+            color_op: BlendOp::Add,
+            color_source: BlendFactor::Zero,
+            color_destination: BlendFactor::SrcColor,
+            alpha_op: BlendOp::Add,
+            alpha_source: BlendFactor::Zero,
+            alpha_destination: BlendFactor::SrcAlpha,
+            mask_red: true,
+            mask_green: true,
+            mask_blue: true,
+            mask_alpha: true,
+        }
+    }
 }
 
 struct RenderState
 {
     drawn_surfaces: Vec<bool>,
+    transparents: Vec<usize>,
 }
 
 impl RenderState
@@ -591,6 +630,7 @@ impl RenderState
         Self
         {
             drawn_surfaces: drawn_surfaces,
+            transparents: Default::default(),
         }
     }
 }
@@ -642,6 +682,12 @@ impl vkcore::RendererAbstract for BspRenderer
             {
                 self.draw_model(model, camera, &mut render_state, &mut builder, dynamic_state, uniform_set.clone());
             }
+        }
+
+        // Leafs are rendered front-to-back, so in order to draw transparent surfaces back-to-front we need to iterate through them in reverse.
+        for surface_index in render_state.transparents.into_iter().rev()
+        {
+            self.draw_transparent(surface_index, camera, &mut builder, dynamic_state, uniform_set.clone());
         }
 
         builder.end_render_pass().unwrap();
@@ -708,7 +754,7 @@ impl BspRenderer
             let renderer = &self.surface_renderers[surface_index];
             if renderer.is_transparent()
             {
-                // TODO: add surface to transparents list
+                render_state.transparents.push(surface_index);
                 continue;
             }
 
@@ -732,12 +778,18 @@ impl BspRenderer
             let renderer = &self.surface_renderers[surface_index];
             if renderer.is_transparent()
             {
-                // TODO: add surface to transparents list
+                // TODO: add surface to transparents list, should insert in the correct position based on camera distance
                 continue;
             }
 
             renderer.draw_surface(builder, camera, dynamic_state, uniforms.clone());
         }
+    }
+
+    fn draw_transparent(&self, surface_index: usize, camera: &vkcore::Camera, builder: &mut AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
+    {
+        let renderer = &self.surface_renderers[surface_index];
+        renderer.draw_surface(builder, camera, dynamic_state, uniforms.clone());
     }
 }
 

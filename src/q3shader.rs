@@ -82,6 +82,17 @@ impl Shader
         false
     }
 
+    pub fn blend_mode(&self) -> BlendMode
+    {
+        let mut iter = self.textures.iter();
+        while let Some(tex) = iter.next()
+        {
+            if tex.blend == BlendMode::Ignore { continue; }
+            return tex.blend;
+        }
+        BlendMode::Opaque
+    }
+
     pub fn alpha_mask(&self) -> AlphaMask
     {
         let mut iter = self.textures.iter();
