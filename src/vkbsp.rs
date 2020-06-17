@@ -257,7 +257,7 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
 
 fn create_fallback_texture(queue: Arc<Queue>) -> Result<Arc<Texture>, ImageCreationError>
 {
-    let (tex, future) = ImmutableImage::from_iter([255u8, 255u8, 255u8, 128u8].iter().cloned(), Dimensions::Dim2d { width: 1, height: 1 }, Format::R8G8B8A8Unorm, queue.clone())?;
+    let (tex, future) = ImmutableImage::from_iter([255u8, 255u8, 255u8, 64u8].iter().cloned(), Dimensions::Dim2d { width: 1, height: 1 }, Format::R8G8B8A8Unorm, queue.clone())?;
     future.flush().unwrap();
     Ok(tex)
 }
@@ -778,7 +778,9 @@ impl BspRenderer
             let renderer = &self.surface_renderers[surface_index];
             if renderer.is_transparent()
             {
-                // TODO: add surface to transparents list, should insert in the correct position based on camera distance
+                // This should really be inserted in a correct position based on camera distance,
+                // but models with transparent surfaces are so rare that it's not really worth the effort to implement.
+                render_state.transparents.push(surface_index);
                 continue;
             }
 
