@@ -12,6 +12,8 @@ layout(set = 1, binding = 0) uniform sampler2D mainTex;
 layout(set = 1, binding = 1) uniform sampler3D lightgridTexA;
 layout(set = 1, binding = 2) uniform sampler3D lightgridTexB;
 
+layout(constant_id = 0) const bool alpha_mask = false;
+
 vec3 decode_latlng(float lat, float lng)
 {
     return vec3(cos(lat) * sin(lng), sin(lat) * sin(lng), cos(lng));
@@ -19,6 +21,8 @@ vec3 decode_latlng(float lat, float lng)
 
 void main() {
     vec4 texColor = texture(mainTex, v_tex_uv);
+    if (alpha_mask && texColor.a < 0.5)
+        discard;
 
     vec4 lightgridA = texture(lightgridTexA, v_lightgrid_uv);
     vec4 lightgridB = texture(lightgridTexB, v_lightgrid_uv);

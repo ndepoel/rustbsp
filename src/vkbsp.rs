@@ -531,12 +531,10 @@ impl Pipelines
             q3shader::CullMode::Back => builder.cull_mode_back(),
         };
 
-        // TODO alpha masking, use specialization constant on fragment shader
-
         let builder = match transparent
         {
-            true => builder.blend_alpha_blending(),
-            false => builder.blend_pass_through(),
+            true => builder.blend_alpha_blending().depth_write(false),
+            false => builder.blend_pass_through().depth_write(true),
         };
 
         // Finally, attach the correct shaders to the pipeline.
@@ -551,22 +549,25 @@ impl Pipelines
             },
             bsp::SurfaceType::Planar =>
             {
+                let sc = world_fs::SpecializationConstants { alpha_mask: masked as u32 };
                 builder
-                    .fragment_shader(self.shaders.world_frag.main_entry_point(), ())
+                    .fragment_shader(self.shaders.world_frag.main_entry_point(), sc)
                     .build(self.device.clone())?
             },
             bsp::SurfaceType::Patch =>
             {
+                let sc = world_fs::SpecializationConstants { alpha_mask: masked as u32 };
                 builder
                     .tessellation_shaders(self.shaders.bezier_tesc.main_entry_point(), (), self.shaders.bezier_tese.main_entry_point(), ())
                     .patch_list(9)
-                    .fragment_shader(self.shaders.world_frag.main_entry_point(), ())
+                    .fragment_shader(self.shaders.world_frag.main_entry_point(), sc)
                     .build(self.device.clone())?
             },
             bsp::SurfaceType::Mesh =>
             {
+                let sc = model_fs::SpecializationConstants { alpha_mask: masked as u32 };
                 builder
-                    .fragment_shader(self.shaders.model_frag.main_entry_point(), ())
+                    .fragment_shader(self.shaders.model_frag.main_entry_point(), sc)
                     .build(self.device.clone())?
             },
             _ => { return Err(GraphicsPipelineCreationError::WrongShaderType); }
@@ -708,7 +709,7 @@ impl BspRenderer
             if renderer.is_transparent()
             {
                 // TODO: add surface to transparents list
-                // continue;
+                continue;
             }
 
             renderer.draw_surface(builder, camera, dynamic_state, uniforms.clone());
@@ -732,7 +733,7 @@ impl BspRenderer
             if renderer.is_transparent()
             {
                 // TODO: add surface to transparents list
-                // continue;
+                continue;
             }
 
             renderer.draw_surface(builder, camera, dynamic_state, uniforms.clone());

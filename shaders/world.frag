@@ -11,8 +11,13 @@ layout(location = 0) out vec4 f_color;
 layout(set = 1, binding = 0) uniform sampler2D mainTex;
 layout(set = 1, binding = 1) uniform sampler2D lightmapTex;
 
+layout(constant_id = 0) const bool alpha_mask = false;
+
 void main() {
     vec4 texColor = texture(mainTex, v_tex_uv);
+    if (alpha_mask && texColor.a < 0.5)
+        discard;
+
     vec4 lightmapColor = texture(lightmapTex, v_lightmap_uv);
 
     //f_color = lightmapColor;   // Just the lightmap
