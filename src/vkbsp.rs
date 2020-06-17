@@ -548,6 +548,7 @@ impl Pipelines
             bsp::SurfaceType::Planar if surface_flags.contains(bsp::SurfaceFlags::SKY) =>
             {
                 builder
+                    .depth_write(false)
                     .fragment_shader(self.shaders.sky_frag.main_entry_point(), ())
                     .build(self.device.clone())?
             },
