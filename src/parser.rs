@@ -54,22 +54,25 @@ pub fn next_token(chars: &mut Chars<'_>) -> Option<String>
     // Skip comment lines and look for the next token
     if token.starts_with("//")
     {
-        skip_line(chars);
+        read_line(chars);
         return next_token(chars);
     }
 
     if token.len() > 0 { Some(token) } else { None }
 }
 
-fn skip_line(chars: &mut Chars<'_>)
+fn read_line(chars: &mut Chars<'_>) -> String
 {
+    let mut line = String::new();
+
     loop
     {
         let item = chars.next();
         match item
         {
-            Some(c) if c == '\r' || c == '\n' => return,
-            _ => continue,
+            Some(c) if c == '\r' || c == '\n' => return line,
+            Some(c) => line.push(c),
+            None => return line,
         }
     }
 }
@@ -85,6 +88,12 @@ pub fn tokenize(string: &str) -> Vec<String>
     }
 
     tokens
+}
+
+pub fn tokenize_line(chars: &mut Chars<'_>) -> Vec<String>
+{
+    let line = read_line(chars);
+    tokenize(&line)
 }
 
 pub fn parse_vector(string: &str) -> Vector3<f32>

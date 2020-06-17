@@ -174,10 +174,18 @@ impl Default for CullMode
 pub struct TextureMap
 {
     pub map: String,
+    pub animation: Option<Animation>,
     pub blend: BlendMode,
     pub mask: AlphaMask,
     pub tc_gen: TexCoordGen,
     pub tc_mod: TexCoordModifier,
+}
+
+#[derive(Debug, Default)]
+pub struct Animation
+{
+    pub frames: Vec<String>,
+    pub frequency: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -352,8 +360,14 @@ fn parse_texture_map(chars: &mut Chars<'_>) -> Option<TextureMap>
             Some(key) if key.to_lowercase() == "map" || key.to_lowercase() == "clampmap" => texture.map = parser::next_token(chars).unwrap_or_default(),
             Some(key) if key.to_lowercase() == "animmap" =>
             { 
-                let _freq = parser::next_token(chars).unwrap_or_default().parse::<f32>().unwrap_or_default();
-                texture.map = parser::next_token(chars).unwrap_or_default();
+                let freq = parser::next_token(chars).unwrap_or_default().parse::<f32>().unwrap_or_default();
+                let anim = Animation
+                {
+                    frames: parser::tokenize_line(chars),
+                    frequency: freq,
+                };
+                texture.map = anim.frames.get(0).cloned().unwrap_or_default();
+                texture.animation = Some(anim);
             },
             Some(key) if key.to_lowercase() == "blendfunc" => texture.blend = parse_blend_func(chars),
             Some(key) if key.to_lowercase() == "alphafunc" => texture.mask = parse_alpha_func(chars),
