@@ -263,7 +263,7 @@ fn create_fallback_texture(queue: Arc<Queue>) -> Result<Arc<Texture>, ImageCreat
         for x in 0..64
         {
             let i = (y * 64 + x) * 4;
-            let c = ((x + y) % 2) as u8 * 255u8;
+            let c = ((x / 4 + y / 4) % 2) as u8 * 255u8;
             buf[i + 0] = c;
             buf[i + 1] = c;
             buf[i + 2] = c;
