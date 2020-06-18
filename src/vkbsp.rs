@@ -374,7 +374,7 @@ fn create_surface_renderer(
 {
     let flags = world.shaders.get(surface.shader_id as usize).and_then(|t| Some(t.surface_flags)).unwrap_or(bsp::SurfaceFlags::empty());
     let shader_def = world.shaders.get(surface.shader_id as usize).and_then(|s| shader_defs.get(s.name()));
-    let is_transparent = shader_def.as_ref().map(|s| s.is_transparent()).unwrap_or_default();
+    let is_transparent = shader_def.as_ref().map(|s| !s.blend_mode().is_opaque()).unwrap_or_default();
     let pipeline = match pipelines.get(surface, flags, shader_def)
     {
         Ok(p) => p,

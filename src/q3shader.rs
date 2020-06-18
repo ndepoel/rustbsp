@@ -62,25 +62,13 @@ impl Shader
         }
     }
 
-    pub fn is_transparent(&self) -> bool
-    {
-        // If the first visible texture layer has blending attributes, the shader is considered transparent
-        let mut iter = self.textures.iter();
-        while let Some(tex) = iter.next()
-        {
-            if tex.blend.is_ignore() { continue; }
-            return !tex.blend.is_opaque();
-        }
-        false
-    }
-
     pub fn blend_mode(&self) -> BlendMode
     {
         let mut iter = self.textures.iter();
         while let Some(tex) = iter.next()
         {
             if tex.blend.is_ignore() { continue; }
-            return tex.blend;
+            if tex.blend.is_opaque() || !tex.map.starts_with("$") { return tex.blend; }
         }
         BlendMode::default()
     }
@@ -90,7 +78,7 @@ impl Shader
         let mut iter = self.textures.iter();
         while let Some(tex) = iter.next()
         {
-            if tex.blend.is_ignore() { continue; }
+            if tex.map.starts_with("$") || tex.blend.is_ignore() { continue; }
             return tex.mask;
         }
         AlphaMask::None
@@ -237,7 +225,7 @@ impl BlendMode
         }
     }
 
-    pub fn is_ignore(&self) -> bool { self.source == BlendFactor::Zero }
+    pub fn is_ignore(&self) -> bool { self.source == BlendFactor::Zero && self.destination == BlendFactor::One }
     pub fn is_opaque(&self) -> bool { self.source == BlendFactor::One && self.destination == BlendFactor::Zero }
 }
 
