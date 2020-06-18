@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::cmp::{ min, max };
 
 use cgmath::{ Vector2, Vector3 };
-use image::{ ImageBuffer, Rgb, Rgba, Pixel, ImageResult, DynamicImage, RgbaImage, ImageError };
+use image::{ ImageBuffer, Rgba, Pixel, ImageResult, DynamicImage, RgbaImage, ImageError };
 use image::imageops;
 
 use super::parser;
@@ -229,9 +229,9 @@ impl BlendMode
                 let src = top.get_pixel(top_x, top_y);
                 let dst = bottom.get_pixel(x + top_x, y + top_y);
 
-                let src = self.source.apply(&src, &src, &dst);
-                let dst = self.destination.apply(&dst, &src, &dst);
-                let result = src.map2(&dst, |s, d| min(s as u32 + d as u32, 255) as u8);
+                let src_factor = self.source.apply(&src, &src, &dst);
+                let dst_factor = self.destination.apply(&dst, &src, &dst);
+                let result = src_factor.map2(&dst_factor, |s, d| min(s as u32 + d as u32, 255) as u8);
 
                 bottom.put_pixel(x + top_x, y + top_y, result);
             }
@@ -619,6 +619,83 @@ mod tests
         }
     }";
 
+    const SLIME: &str = "textures/liquids/slime1
+	{
+	//	*************************************************		
+	//	* SLIME Feb 11 1999 				*
+	//	* IF YOU CHANGE THIS PLEASE COMMENT THE CHANGE	*
+	//	*************************************************	
+
+		// Added to g3map_global texture on May 11, 1999
+		qer_editorimage textures/liquids/slime7.tga
+		q3map_lightimage textures/liquids/slime7.tga
+		q3map_globaltexture
+		qer_trans .5
+
+		surfaceparm noimpact
+		surfaceparm slime
+		surfaceparm nolightmap
+		surfaceparm trans		
+
+		q3map_surfacelight 100
+		tessSize 32
+		cull disable
+
+		deformVertexes wave 100 sin 0 1 .5 .5
+
+		{
+			map textures/liquids/slime7c.tga
+			tcMod turb .3 .2 1 .05
+			tcMod scroll .01 .01
+		}
+	
+		{
+			map textures/liquids/slime7.tga
+			blendfunc GL_ONE GL_ONE
+			tcMod turb .2 .1 1 .05
+			tcMod scale .5 .5
+			tcMod scroll .01 .01
+		}
+
+		{
+			map textures/liquids/bubbles.tga
+			blendfunc GL_ZERO GL_SRC_COLOR
+			tcMod turb .2 .1 .1 .2
+			tcMod scale .05 .05
+			tcMod scroll .001 .001
+		}		
+
+		// 	END
+    }";
+    
+    const GRATE: &str = "textures/base_floor/cybergrate3
+    {
+        cull disable
+        surfaceparm alphashadow
+        surfaceparm	metalsteps	
+        surfaceparm nomarks
+            {
+                    map textures/sfx/hologirl.tga
+                    blendFunc add
+                    tcmod scale  1.2 .5
+                    tcmod scroll 3.1 1.1
+            
+            }
+            {
+                    map textures/base_floor/cybergrate3.tga
+                    alphaFunc GE128
+            depthWrite
+            }
+            {
+            map $lightmap
+            rgbGen identity
+            blendFunc filter
+            depthFunc equal
+        }
+    
+    
+    }";
+
     #[test]
     fn test_alphamasked()
     {
@@ -674,5 +751,29 @@ mod tests
         assert_eq!("$lightmap", shader.textures[0].map);
         assert_eq!("textures/gothic_trim/column2c_test.tga", shader.textures[1].map);
         assert_eq!(BlendMode::multiply(), shader.textures[1].blend);
+    }
+
+    #[test]
+    fn test_blend()
+    {
+        let mut chars = SLIME.chars();
+        let sh = parse_shader(&mut chars);
+        assert!(sh.is_some());
+        let shader = &sh.unwrap();
+
+        assert_eq!(CullMode::None, shader.cull);
+        assert_eq!(3, shader.textures.len());
+
+        assert_eq!("textures/liquids/slime7c.tga", shader.textures[0].map);
+        assert_eq!(BlendMode::replace(), shader.textures[0].blend);
+        assert_eq!(AlphaMask::None, shader.textures[0].mask);
+
+        assert_eq!("textures/liquids/slime7.tga", shader.textures[1].map);
+        assert_eq!(BlendMode::add(), shader.textures[1].blend);
+        assert_eq!(AlphaMask::None, shader.textures[1].mask);
+
+        assert_eq!("textures/liquids/bubbles.tga", shader.textures[2].map);
+        assert_eq!(BlendMode::new(BlendFactor::Zero, BlendFactor::SrcColor), shader.textures[2].blend);
+        assert_eq!(AlphaMask::None, shader.textures[2].mask);
     }
 }
