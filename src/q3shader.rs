@@ -65,12 +65,14 @@ impl Shader
     pub fn blend_mode(&self) -> BlendMode
     {
         let mut iter = self.textures.iter();
+        let mut first_blend = None;
         while let Some(tex) = iter.next()
         {
             if tex.blend.is_ignore() { continue; }
-            if tex.blend.is_opaque() || !tex.map.starts_with("$") { return tex.blend; }
+            if tex.blend.is_opaque() { return tex.blend; }  // If any layer is opaque, we regard the entire surface as opaque
+            if !tex.map.starts_with("$") { first_blend = Some(first_blend.unwrap_or(tex.blend)); }  // Otherwise, return the blend mode of the first 'normal' texture layer
         }
-        BlendMode::default()
+        first_blend.unwrap_or_default()
     }
 
     pub fn alpha_mask(&self) -> AlphaMask
@@ -79,7 +81,7 @@ impl Shader
         while let Some(tex) = iter.next()
         {
             if tex.map.starts_with("$") || tex.blend.is_ignore() { continue; }
-            return tex.mask;
+            if tex.mask != AlphaMask::None { return tex.mask; } // If any layer is alpha-masked, we consider the entire surface alpha-masked
         }
         AlphaMask::None
     }
