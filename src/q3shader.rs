@@ -1,10 +1,10 @@
 use std::str::Chars;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::cmp::max;
+use std::cmp::{ min, max };
 
 use cgmath::{ Vector2, Vector3 };
-use image::{ ImageBuffer, Rgb, Pixel, ImageResult, DynamicImage, RgbaImage, ImageError };
+use image::{ ImageBuffer, Rgb, Rgba, Pixel, ImageResult, DynamicImage, RgbaImage, ImageError };
 use image::imageops;
 
 use super::parser;
@@ -47,15 +47,8 @@ impl Shader
                     composite = Some(imageops::resize(composite.as_ref().unwrap(), max_w, max_h, imageops::FilterType::Triangle));
                 }
 
-                // Combine the two texture maps together. This is currently very crude, just replacing and alpha blending supported.
-                match tex.blend
-                {
-                    BlendMode::Opaque => { imageops2::alpha_mask(composite.as_mut().unwrap(), &img, 0, 0); },
-                    BlendMode::Add => { imageops2::add(composite.as_mut().unwrap(), &img, 0, 0); },
-                    BlendMode::Multiply => { imageops2::multiply(composite.as_mut().unwrap(), &img, 0, 0); },
-                    BlendMode::AlphaBlend => { imageops::overlay(composite.as_mut().unwrap(), &img, 0, 0); },
-                    BlendMode::Ignore => { },
-                };
+                // Combine the two texture maps together
+                tex.blend.apply(composite.as_mut().unwrap(), &img, 0, 0);
             }
             else
             {
@@ -76,8 +69,8 @@ impl Shader
         let mut iter = self.textures.iter();
         while let Some(tex) = iter.next()
         {
-            if tex.blend == BlendMode::Ignore { continue; }
-            return tex.blend != BlendMode::Opaque;
+            if tex.blend.is_ignore() { continue; }
+            return !tex.blend.is_opaque();
         }
         false
     }
@@ -87,10 +80,10 @@ impl Shader
         let mut iter = self.textures.iter();
         while let Some(tex) = iter.next()
         {
-            if tex.blend == BlendMode::Ignore { continue; }
+            if tex.blend.is_ignore() { continue; }
             return tex.blend;
         }
-        BlendMode::Opaque
+        BlendMode::default()
     }
 
     pub fn alpha_mask(&self) -> AlphaMask
@@ -98,7 +91,7 @@ impl Shader
         let mut iter = self.textures.iter();
         while let Some(tex) = iter.next()
         {
-            if tex.blend == BlendMode::Ignore { continue; }
+            if tex.blend.is_ignore() { continue; }
             return tex.mask;
         }
         AlphaMask::None
@@ -200,18 +193,93 @@ pub struct Animation
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BlendMode
+pub struct BlendMode
 {
-    Opaque,
-    Add,
-    Multiply,
-    AlphaBlend,
-    Ignore,
+    pub source: BlendFactor,
+    pub destination: BlendFactor,
 }
 
 impl Default for BlendMode
 {
-    fn default() -> Self { Self::Opaque }
+    fn default() -> Self { Self::replace() }
+}
+
+impl BlendMode
+{
+    fn new(source: BlendFactor, destination: BlendFactor) -> Self
+    {
+        Self { source: source, destination: destination }
+    }
+
+    fn replace() -> Self { Self::new(BlendFactor::One, BlendFactor::Zero) }
+    fn add() -> Self { Self::new(BlendFactor::One, BlendFactor::One) }
+    fn multiply() -> Self { Self::new(BlendFactor::DstColor, BlendFactor::Zero) }
+    fn blend() -> Self { Self::new(BlendFactor::SrcAlpha, BlendFactor::OneMinusSrcAlpha) }
+
+    pub fn apply(&self, bottom: &mut RgbaImage, top: &RgbaImage, x: u32, y: u32)
+    {
+        let bottom_dims = bottom.dimensions();
+        let top_dims = top.dimensions();
+
+        // Crop our top image if we're going out of bounds
+        let (range_width, range_height) = imageops::overlay_bounds(bottom_dims, top_dims, x, y);
+
+        for top_y in 0..range_height {
+            for top_x in 0..range_width {
+                let src = top.get_pixel(top_x, top_y);
+                let dst = bottom.get_pixel(x + top_x, y + top_y);
+
+                let src = self.source.apply(&src, &src, &dst);
+                let dst = self.destination.apply(&dst, &src, &dst);
+                let result = src.map2(&dst, |s, d| min(s as u32 + d as u32, 255) as u8);
+
+                bottom.put_pixel(x + top_x, y + top_y, result);
+            }
+        }
+    }
+
+    pub fn is_ignore(&self) -> bool { self.source == BlendFactor::Zero }
+    pub fn is_opaque(&self) -> bool { self.source == BlendFactor::One && self.destination == BlendFactor::Zero }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlendFactor
+{
+    One,
+    Zero,
+    SrcColor,
+    OneMinusSrcColor,
+    SrcAlpha,
+    OneMinusSrcAlpha,
+    DstColor,
+    OneMinusDstColor,
+    DstAlpha,
+    OneMinusDstAlpha,
+}
+
+impl Default for BlendFactor
+{
+    fn default() -> Self { Self::One }
+}
+
+impl BlendFactor
+{
+    fn apply(self, target: &Rgba<u8>, src: &Rgba<u8>, dst: &Rgba<u8>) -> Rgba<u8>
+    {
+        match self
+        {
+            Self::One => target.clone(),
+            Self::Zero => target.map(|_| 0u8),
+            Self::SrcColor => target.map2(src, |t, s| (t as u32 * s as u32 / 255) as u8),
+            Self::OneMinusSrcColor => target.map2(src, |t, s| (t as u32 * (255 - s as u32) / 255) as u8),
+            Self::SrcAlpha => target.map(|t| (t as u32 * src[3] as u32 / 255) as u8),
+            Self::OneMinusSrcAlpha => target.map(|t| (t as u32 * (255 - src[3] as u32) / 255) as u8),
+            Self::DstColor => target.map2(dst, |t, d| (t as u32 * d as u32 / 255) as u8),
+            Self::OneMinusDstColor => target.map2(dst, |t, d| (t as u32 * (255 - d as u32) / 255) as u8),
+            Self::DstAlpha => target.map(|t| (t as u32 * dst[3] as u32 / 255) as u8),
+            Self::OneMinusDstAlpha => target.map(|t| (t as u32 * (255 - dst[3] as u32) / 255) as u8),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -306,51 +374,32 @@ fn parse_cull_mode(chars: &mut Chars<'_>) -> CullMode
     }
 }
 
+fn parse_blend_factor(string: &str) -> BlendFactor
+{
+    match string.to_lowercase().as_str()
+    {
+        "gl_one" => BlendFactor::One,
+        "gl_zero" => BlendFactor::Zero,
+        "gl_src_color" => BlendFactor::SrcColor,
+        "gl_one_minus_src_color" => BlendFactor::OneMinusSrcColor,
+        "gl_src_alpha" => BlendFactor::SrcAlpha,
+        "gl_one_minus_src_alpha" => BlendFactor::OneMinusSrcAlpha,
+        "gl_dst_color" => BlendFactor::DstColor,
+        "gl_one_minus_dst_color" => BlendFactor::OneMinusDstColor,
+        "gl_dst_alpha" => BlendFactor::DstAlpha,
+        "gl_one_minus_dst_alpha" => BlendFactor::OneMinusDstAlpha,
+        _ => BlendFactor::Zero,
+    }
+}
+
 fn parse_blend_func(chars: &mut Chars<'_>) -> BlendMode
 {
     match parser::next_token(chars)
     {
-        Some(token) if token.to_lowercase() == "add" => BlendMode::Add,
-        Some(token) if token.to_lowercase() == "filter" => BlendMode::Multiply,
-        Some(token) if token.to_lowercase() == "blend" => BlendMode::AlphaBlend,
-        Some(token) if token.to_lowercase() == "gl_add" => BlendMode::Add,
-        Some(token) if token.to_lowercase() == "gl_one" => match parser::next_token(chars)
-        {
-            Some(token) if token.to_lowercase() == "gl_zero" => BlendMode::Opaque,
-            Some(token) if token.to_lowercase() == "gl_one" => BlendMode::Add,
-            // Some(token) => { println!("Unsupported blend mode: GL_ONE {}", token); BlendMode::Opaque },
-            _ => BlendMode::Opaque,
-        },
-        Some(token) if token.to_lowercase() == "gl_zero" => match parser::next_token(chars)
-        {
-            Some(token) if token.to_lowercase() == "gl_src_color" => BlendMode::Multiply,
-            Some(token) if token.to_lowercase() == "gl_one" => BlendMode::Ignore,
-            // Some(token) => { println!("Unsupported blend mode: GL_ZERO {}", token); BlendMode::Ignore },
-            _ => BlendMode::Ignore,
-        },
-        Some(token) if token.to_lowercase() == "gl_dst_color" => match parser::next_token(chars)
-        {
-            Some(token) if token.to_lowercase() == "gl_zero" => BlendMode::Multiply,
-            // Some(token) => { println!("Unsupported blend mode: GL_DST_COLOR {}", token); BlendMode::Multiply },
-            _ => BlendMode::Multiply,
-        },
-        Some(token) if token.to_lowercase() == "gl_one_minus_dst_color" => match parser::next_token(chars)
-        {
-            // Some(token) => { println!("Unsupported blend mode: GL_ONE_MINUS_DST_COLOR {}", token); BlendMode::Multiply },
-            _ => BlendMode::Multiply,
-        }
-        Some(token) if token.to_lowercase() == "gl_src_alpha" => match parser::next_token(chars)
-        {
-            Some(token) if token.to_lowercase() == "gl_one_minus_src_alpha" => BlendMode::AlphaBlend,
-            // Some(token) => { println!("Unsupported blend mode: GL_SRC_ALPHA {}", token); BlendMode::default() },
-            _ => BlendMode::default(),
-        },
-        Some(token) if token.to_lowercase() == "gl_one_minus_src_alpha" => match parser::next_token(chars)
-        {
-            // Some(token) => { println!("Unsupported blend mode: GL_ONE_MINUS_SRC_ALPHA {}", token); BlendMode::default() },
-            _ => BlendMode::default(),
-        },
-        // Some(token) => { println!("Unsupported blend mode: {}", token); BlendMode::default() },
+        Some(token) if token.to_lowercase() == "add" || token.to_lowercase() == "gl_add" => BlendMode { source: BlendFactor::One, destination: BlendFactor::One },
+        Some(token) if token.to_lowercase() == "filter" => BlendMode { source: BlendFactor::DstColor, destination: BlendFactor::Zero },
+        Some(token) if token.to_lowercase() == "blend" => BlendMode { source: BlendFactor::SrcAlpha, destination: BlendFactor::OneMinusSrcAlpha },
+        Some(token) => BlendMode { source: parse_blend_factor(&token), destination: parse_blend_factor(&parser::next_token(chars).unwrap_or_default()) },
         _ => BlendMode::default(),
     }
 }
@@ -582,11 +631,11 @@ mod tests
 
         assert_eq!(2, shader.textures.len());
         assert_eq!("textures/base_wall/girders1i_yellodark_fin.tga", shader.textures[0].map);
-        assert_eq!(BlendMode::Opaque, shader.textures[0].blend);
+        assert_eq!(BlendMode::replace(), shader.textures[0].blend);
         assert_eq!(AlphaMask::Ge128, shader.textures[0].mask);
 
         assert_eq!("$lightmap", shader.textures[1].map);
-        assert_eq!(BlendMode::Multiply, shader.textures[1].blend);
+        assert_eq!(BlendMode::multiply(), shader.textures[1].blend);
         assert_eq!(AlphaMask::None, shader.textures[1].mask);
     }
 
@@ -602,11 +651,11 @@ mod tests
         assert_eq!(3, shader.textures.len());
 
         assert_eq!("textures/sfx/firegorre.tga", shader.textures[0].map);
-        assert_eq!(BlendMode::Opaque, shader.textures[0].blend);
+        assert_eq!(BlendMode::replace(), shader.textures[0].blend);
         assert_eq!(AlphaMask::None, shader.textures[0].mask);
 
         assert_eq!("textures/gothic_floor/largerblock3b_ow.tga", shader.textures[1].map);
-        assert_eq!(BlendMode::AlphaBlend, shader.textures[1].blend);
+        assert_eq!(BlendMode::blend(), shader.textures[1].blend);
         assert_eq!(AlphaMask::None, shader.textures[1].mask);
     }
 
@@ -624,6 +673,6 @@ mod tests
 
         assert_eq!("$lightmap", shader.textures[0].map);
         assert_eq!("textures/gothic_trim/column2c_test.tga", shader.textures[1].map);
-        assert_eq!(BlendMode::Multiply, shader.textures[1].blend);
+        assert_eq!(BlendMode::multiply(), shader.textures[1].blend);
     }
 }

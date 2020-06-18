@@ -512,7 +512,8 @@ impl Pipelines
         hasher.write_u8(surface_flags.contains(bsp::SurfaceFlags::SKY) as u8);
         hasher.write_i32(cull as i32);
         hasher.write_i32(mask as i32);
-        hasher.write_i32(blend as i32);
+        hasher.write_i32(blend.source as i32);
+        hasher.write_i32(blend.destination as i32);
         hasher.write_u8(baked_lighting as u8);
         let hash = hasher.finish();
 
@@ -550,14 +551,9 @@ impl Pipelines
             q3shader::CullMode::Back => builder.cull_mode_back(),
         };
 
-        let builder = match blend
-        {
-            q3shader::BlendMode::Opaque => builder.blend_pass_through().depth_write(true),
-            q3shader::BlendMode::AlphaBlend => builder.blend_alpha_blending().depth_write(false),
-            q3shader::BlendMode::Add => builder.blend_collective(Self::add_blending()).depth_write(false),
-            q3shader::BlendMode::Multiply => builder.blend_collective(Self::multiply_blending()).depth_write(false),
-            q3shader::BlendMode::Ignore => builder.blend_collective(AttachmentBlend::ignore_source()).depth_write(false),
-        };
+        let builder = builder
+            .blend_collective(Self::create_attachment_blend(blend))
+            .depth_write(blend.is_opaque());
 
         // Finally, attach the correct shaders to the pipeline.
         // We also build the pipeline in here because the builder struct changes type depending on what shaders you attach, so the match's result types would be incompatible otherwise.
@@ -599,16 +595,20 @@ impl Pipelines
         Ok(Arc::new(pipeline))
     }
 
-    #[inline]
-    fn add_blending() -> AttachmentBlend {
-        AttachmentBlend {
+    fn create_attachment_blend(blend_mode: q3shader::BlendMode) -> AttachmentBlend
+    {
+        let src = Self::to_blend_factor(blend_mode.source);
+        let dst = Self::to_blend_factor(blend_mode.destination);
+
+        AttachmentBlend 
+        {
             enabled: true,
             color_op: BlendOp::Add,
-            color_source: BlendFactor::One,
-            color_destination: BlendFactor::One,
+            color_source: src,
+            color_destination: dst,
             alpha_op: BlendOp::Add,
-            alpha_source: BlendFactor::One,
-            alpha_destination: BlendFactor::One,
+            alpha_source: src,
+            alpha_destination: dst,
             mask_red: true,
             mask_green: true,
             mask_blue: true,
@@ -616,20 +616,21 @@ impl Pipelines
         }
     }
 
-    #[inline]
-    fn multiply_blending() -> AttachmentBlend {
-        AttachmentBlend {
-            enabled: true,
-            color_op: BlendOp::Add,
-            color_source: BlendFactor::Zero,
-            color_destination: BlendFactor::SrcColor,
-            alpha_op: BlendOp::Add,
-            alpha_source: BlendFactor::Zero,
-            alpha_destination: BlendFactor::SrcAlpha,
-            mask_red: true,
-            mask_green: true,
-            mask_blue: true,
-            mask_alpha: true,
+    fn to_blend_factor(blend_factor: q3shader::BlendFactor) -> BlendFactor
+    {
+        // This is a bit dumb, but I wanted to avoid adding Vulkano dependencies inside q3shader
+        match blend_factor
+        {
+            q3shader::BlendFactor::One => BlendFactor::One,
+            q3shader::BlendFactor::Zero => BlendFactor::Zero,
+            q3shader::BlendFactor::SrcColor => BlendFactor::SrcColor,
+            q3shader::BlendFactor::OneMinusSrcColor => BlendFactor::OneMinusSrcColor,
+            q3shader::BlendFactor::SrcAlpha => BlendFactor::SrcAlpha,
+            q3shader::BlendFactor::OneMinusSrcAlpha => BlendFactor::OneMinusSrcAlpha,
+            q3shader::BlendFactor::DstColor => BlendFactor::DstColor,
+            q3shader::BlendFactor::OneMinusDstColor => BlendFactor::OneMinusDstColor,
+            q3shader::BlendFactor::DstAlpha => BlendFactor::DstAlpha,
+            q3shader::BlendFactor::OneMinusDstAlpha => BlendFactor::OneMinusDstAlpha,
         }
     }
 }
