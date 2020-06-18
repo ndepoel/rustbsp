@@ -8,7 +8,6 @@ use image::{ ImageBuffer, Rgba, Pixel, ImageResult, DynamicImage, RgbaImage, Ima
 use image::imageops;
 
 use super::parser;
-use super::imageops2;
 
 #[derive(Debug, Default)]
 pub struct Shader

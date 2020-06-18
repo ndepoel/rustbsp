@@ -18,7 +18,6 @@ use glob::glob;
 mod bsp;
 mod parser;
 mod entity;
-mod imageops2;
 mod q3shader;
 mod vkcore;
 mod vkbsp;
