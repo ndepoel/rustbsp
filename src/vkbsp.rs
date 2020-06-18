@@ -257,7 +257,20 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
 
 fn create_fallback_texture(queue: Arc<Queue>) -> Result<Arc<Texture>, ImageCreationError>
 {
-    let (tex, future) = ImmutableImage::from_iter([255u8, 255u8, 255u8, 64u8].iter().cloned(), Dimensions::Dim2d { width: 1, height: 1 }, Format::R8G8B8A8Unorm, queue.clone())?;
+    let mut buf = [0u8; 64 * 64 * 4];
+    for y in 0..64
+    {
+        for x in 0..64
+        {
+            let i = (y * 64 + x) * 4;
+            let c = ((x + y) % 2) as u8 * 255u8;
+            buf[i + 0] = c;
+            buf[i + 1] = c;
+            buf[i + 2] = c;
+            buf[i + 3] = 64u8;
+        }
+    }
+    let (tex, future) = ImmutableImage::from_iter(buf.iter().cloned(), Dimensions::Dim2d { width: 64, height: 64 }, Format::R8G8B8A8Unorm, queue.clone())?;
     future.flush().unwrap();
     Ok(tex)
 }
