@@ -103,6 +103,16 @@ impl Shader
         }
         AlphaMask::None
     }
+
+    pub fn uses_baked_lighting(&self) -> bool
+    {
+        let mut iter = self.textures.iter();
+        while let Some(tex) = iter.next()
+        {
+            if tex.map == "$lightmap" || tex.rgb_gen == RgbGen::Entity || tex.rgb_gen == RgbGen::Vertex { return true; }
+        }
+        false
+    }
 }
 
 pub fn load_image_file(tex_name: &str) -> ImageResult<RgbaImage>
@@ -179,6 +189,7 @@ pub struct TextureMap
     pub mask: AlphaMask,
     pub tc_gen: TexCoordGen,
     pub tc_mod: TexCoordModifier,
+    pub rgb_gen: RgbGen,
 }
 
 #[derive(Debug, Default)]
@@ -265,6 +276,24 @@ impl Default for TexCoordGen
     fn default() -> Self { Self::Base }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RgbGen
+{
+    Identity,
+    IdentityLighting,
+    Wave,
+    Entity,
+    OneMinusEntity,
+    Vertex,
+    OneMinusVertex,
+    LightingDiffuse,
+}
+
+impl Default for RgbGen
+{
+    fn default() -> Self { Self::Identity }
+}
+
 fn parse_cull_mode(chars: &mut Chars<'_>) -> CullMode
 {
     match parser::next_token(chars)
@@ -348,6 +377,22 @@ fn parse_tc_gen(chars: &mut Chars<'_>) -> TexCoordGen
     }
 }
 
+fn parse_rgb_gen(chars: &mut Chars<'_>) -> RgbGen
+{
+    match parser::next_token(chars)
+    {
+        Some(token) if token.to_lowercase() == "identity" => RgbGen::Identity,
+        Some(token) if token.to_lowercase() == "identitylighting" => RgbGen::IdentityLighting,
+        Some(token) if token.to_lowercase() == "wave" => { parser::tokenize_line(chars); RgbGen::Wave },
+        Some(token) if token.to_lowercase() == "entity" => RgbGen::Entity,
+        Some(token) if token.to_lowercase() == "oneminusentity" => RgbGen::OneMinusEntity,
+        Some(token) if token.to_lowercase() == "vertex" || token.to_lowercase() == "exactvertex" => RgbGen::Vertex,
+        Some(token) if token.to_lowercase() == "oneminusvertex" => RgbGen::OneMinusVertex,
+        Some(token) if token.to_lowercase() == "lightingdiffuse" => RgbGen::LightingDiffuse,
+        _ => RgbGen::default(),
+    }
+}
+
 fn parse_texture_map(chars: &mut Chars<'_>) -> Option<TextureMap>
 {
     let mut texture = TextureMap::default();
@@ -372,6 +417,7 @@ fn parse_texture_map(chars: &mut Chars<'_>) -> Option<TextureMap>
             Some(key) if key.to_lowercase() == "blendfunc" => texture.blend = parse_blend_func(chars),
             Some(key) if key.to_lowercase() == "alphafunc" => texture.mask = parse_alpha_func(chars),
             Some(key) if key.to_lowercase() == "tcgen" => texture.tc_gen = parse_tc_gen(chars),
+            Some(key) if key.to_lowercase() == "rgbgen" => texture.rgb_gen = parse_rgb_gen(chars),
             Some(_) => continue,
             None => break,
         }

@@ -14,6 +14,7 @@ layout(set = 1, binding = 1) uniform sampler2D lightmapTex;
 layout(constant_id = 0) const bool alpha_mask = false;
 layout(constant_id = 1) const float alpha_offset = 0.0;
 layout(constant_id = 2) const bool alpha_invert = false;
+layout(constant_id = 3) const bool baked_lighting = true;
 
 void main() {
     vec4 texColor = texture(mainTex, v_tex_uv);
@@ -25,7 +26,7 @@ void main() {
             discard;
     }
 
-    vec4 lightmapColor = texture(lightmapTex, v_lightmap_uv);
+    vec4 lightmapColor = baked_lighting ? texture(lightmapTex, v_lightmap_uv) : vec4(1, 1, 1, 1);
 
     //f_color = lightmapColor;   // Just the lightmap
     //f_color = vec4((normalize(v_normal) + vec3(1, 1, 1)) * 0.5, 1.0);    // World-space normals
