@@ -150,6 +150,7 @@ struct PatchSurfaceRenderer
     vertex_slice: Arc<VertexSlice>,
     index_buffer: Arc<ImmutableBuffer<[u32]>>,  // This renderer has its own index buffer, to break apart the surface into separate patches of 9 vertices each
     descriptor_set: Arc<dyn DescriptorSet + Sync + Send>,
+    is_transparent: bool,
 }
 
 struct SkySurfaceRenderer
@@ -455,6 +456,7 @@ fn create_surface_renderer(
                 vertex_slice: vertex_slice.clone(),
                 index_buffer: index_buffer.clone(),
                 descriptor_set: descriptor_set.clone(),
+                is_transparent: is_transparent,
             }))
         },
         bsp::SurfaceType::Mesh =>
@@ -840,7 +842,7 @@ impl SurfaceRenderer for PlanarSurfaceRenderer
 
 impl SurfaceRenderer for PatchSurfaceRenderer
 {
-    fn is_transparent(&self) -> bool { false }
+    fn is_transparent(&self) -> bool { self.is_transparent }
 
     fn draw_surface(&self, builder: &mut AutoCommandBufferBuilder, _camera: &vkcore::Camera, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
     {
