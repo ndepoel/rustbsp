@@ -768,7 +768,7 @@ impl BspRenderer
 
             let surface = &self.world.surfaces[surface_index];
             let texture = &self.world.shaders[surface.shader_id as usize];
-            if texture.surface_flags.contains(bsp::SurfaceFlags::NODRAW) || texture.content_flags.intersects(bsp::ContentFlags::WATER | bsp::ContentFlags::FOG)
+            if texture.surface_flags.contains(bsp::SurfaceFlags::NODRAW) || texture.content_flags.intersects(bsp::ContentFlags::FOG)
             {
                 continue;
             }
