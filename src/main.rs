@@ -21,6 +21,7 @@ mod entity;
 mod q3shader;
 mod vkcore;
 mod vkbsp;
+mod frustum;
 
 fn main() -> Result<(), Box<dyn std::error::Error>>
 {

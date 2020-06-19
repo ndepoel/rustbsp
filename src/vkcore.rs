@@ -29,6 +29,7 @@ use super::vkbsp;
 use super::bsp;
 use super::entity;
 use super::q3shader;
+use super::frustum;
 
 pub trait RendererAbstract
 {
@@ -40,6 +41,8 @@ pub struct Camera
     pub position: cgmath::Vector3<f32>,
     pub rotation: cgmath::Vector3<f32>, // Pitch, roll, yaw
 
+    pub frustum: frustum::Frustum,
+
     pub time: f32,
     pub time_delta: f32,
 
@@ -48,6 +51,9 @@ pub struct Camera
     near: f32,
     far: f32,
 
+    view_matrix: cgmath::Matrix4<f32>,
+    projection_matrix: cgmath::Matrix4<f32>,
+
     mouse_sensitivity: f32,
     movement_speed: f32,
 }
@@ -55,6 +61,45 @@ pub struct Camera
 impl Camera
 {
     pub fn view_matrix(&self) -> cgmath::Matrix4<f32>
+    {
+        self.view_matrix
+    }
+
+    pub fn projection_matrix(&self) -> cgmath::Matrix4<f32>
+    {
+        self.projection_matrix
+    }
+
+    pub fn to_quaternion(&self) -> cgmath::Quaternion<f32>
+    {
+        cgmath::Quaternion::from_angle_z(cgmath::Deg(self.rotation.z)) *
+        cgmath::Quaternion::from_angle_x(cgmath::Deg(self.rotation.x)) *
+        cgmath::Quaternion::from_angle_y(cgmath::Deg(self.rotation.y))
+    }
+
+    pub fn width(&self) -> f32
+    {
+        self.dimensions[0]
+    }
+
+    pub fn height(&self) -> f32
+    {
+        self.dimensions[1]
+    }
+
+    pub fn aspect_ratio(&self) -> f32
+    {
+        self.dimensions[0] / self.dimensions[1]
+    }
+
+    fn update(&mut self)
+    {
+        self.view_matrix = self.calculate_view_matrix();
+        self.projection_matrix = self.calculate_projection_matrix();
+        self.frustum.update(&self.projection_matrix, &self.view_matrix);
+    }
+
+    fn calculate_view_matrix(&self) -> cgmath::Matrix4<f32>
     {
         // Start off with a view matrix that moves us from Vulkan's coordinate system to Quake's (+Z is up)
         let view = cgmath::Matrix4::from_cols(
@@ -70,14 +115,7 @@ impl Camera
             cgmath::Matrix4::from_translation(-self.position)
     }
 
-    pub fn to_quaternion(&self) -> cgmath::Quaternion<f32>
-    {
-        cgmath::Quaternion::from_angle_z(cgmath::Deg(self.rotation.z)) *
-        cgmath::Quaternion::from_angle_x(cgmath::Deg(self.rotation.x)) *
-        cgmath::Quaternion::from_angle_y(cgmath::Deg(self.rotation.y))
-    }
-
-    pub fn projection_matrix(&self) -> cgmath::Matrix4<f32>
+    fn calculate_projection_matrix(&self) -> cgmath::Matrix4<f32>
     {
         // We need to define out own perspective projection matrix here since cgmath::perspective is made for use with OpenGL,
         // which has a clip space Z range of [-1, 1]. Vulkan uses a range of [0, 1] so the projection matrix needs to be different.
@@ -111,21 +149,6 @@ impl Camera
             c2r0, c2r1, c2r2, c2r3,
             c3r0, c3r1, c3r2, c3r3,
         )
-    }
-
-    pub fn width(&self) -> f32
-    {
-        self.dimensions[0]
-    }
-
-    pub fn height(&self) -> f32
-    {
-        self.dimensions[1]
-    }
-
-    pub fn aspect_ratio(&self) -> f32
-    {
-        self.dimensions[0] / self.dimensions[1]
     }
 }
 
@@ -264,6 +287,9 @@ pub fn init(world: bsp::World, entities: Vec<entity::Entity>, shaders: HashMap<S
         time_delta: 0.0,
         mouse_sensitivity: 0.08,
         movement_speed: 250.0,
+        view_matrix: cgmath::Matrix4::from_scale(1.0),
+        projection_matrix: cgmath::Matrix4::from_scale(1.0),
+        frustum: Default::default(),
     };
 
     let start_time = Instant::now();
@@ -306,6 +332,7 @@ pub fn init(world: bsp::World, entities: Vec<entity::Entity>, shaders: HashMap<S
                 camera.rotation = camera.rotation.lerp(target_rotation, amount);
                 camera.time = time;
                 camera.time_delta = time_delta;
+                camera.update();
 
                 // Build the command buffer; apparently building the command buffer on each frame IS expected (good to know)
                 // This would typically be delegated to another function where the actual setup of whatever you want to render would happen.

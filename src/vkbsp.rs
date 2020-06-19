@@ -725,7 +725,7 @@ impl BspRenderer
         {
             let leaf_index = !node_index as usize;
             let leaf = &self.world.leafs[leaf_index];
-            if self.world.cluster_visible(cluster, leaf.cluster)
+            if self.world.cluster_visible(cluster, leaf.cluster) && camera.frustum.box_inside_i32(leaf.mins, leaf.maxs)
             {
                 self.draw_leaf(leaf, camera, render_state, builder, dynamic_state, uniforms.clone());
             }
