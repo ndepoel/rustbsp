@@ -700,7 +700,7 @@ impl vkcore::RendererAbstract for BspRenderer
         {
             // This is a rather crude visibility check using only the model's center point but it works well enough
             let model_leaf = self.world.leaf_at_position((model.mins + model.maxs) * 0.5);
-            if self.world.cluster_visible(cam_leaf.cluster, self.world.leafs[model_leaf].cluster)
+            if self.world.cluster_visible(cam_leaf.cluster, self.world.leafs[model_leaf].cluster) && camera.frustum.box_inside(model.mins, model.maxs)
             {
                 self.draw_model(model, camera, &mut render_state, &mut builder, dynamic_state, uniform_set.clone());
             }
