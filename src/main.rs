@@ -20,6 +20,7 @@ mod parser;
 mod entity;
 mod q3shader;
 mod vkcore;
+mod vkutil;
 mod vkbsp;
 mod frustum;
 

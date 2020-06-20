@@ -27,6 +27,7 @@ use std::hash::Hasher;
 use cgmath::prelude::*;
 
 use super::vkcore;
+use super::vkutil;
 use super::bsp;
 use super::q3shader;
 
@@ -201,7 +202,7 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
                 // Some textures are referenced through a shader definition
                 match shader_def.load_image()
                 {
-                    Ok(img) => load_texture(queue.clone(), img).unwrap(),
+                    Ok(img) => load_texture(queue.clone(), img, false).unwrap(),
                     _ => load_texture_file(queue.clone(), shader.name()).unwrap()
                 }
             }
@@ -276,14 +277,16 @@ fn create_fallback_texture(queue: Arc<Queue>) -> Result<Arc<Texture>, ImageCreat
     Ok(tex)
 }
 
-fn load_texture(queue: Arc<Queue>, img: RgbaImage) -> Result<Arc<Texture>, ImageCreationError>
+fn load_texture(queue: Arc<Queue>, img: RgbaImage, mipmap: bool) -> Result<Arc<Texture>, ImageCreationError>
 {
-    // let (w, h) = img.dimensions();
-    // let img = image::imageops::resize(&img, w * 4, h * 4, image::imageops::FilterType::Lanczos3);
-    // let img = image::imageops::unsharpen(&img, 0.7, 2);
-
-    let (w, h) = img.dimensions();
-    let (tex, future) = ImmutableImage::from_iter(img.into_raw().iter().cloned(), Dimensions::Dim2d { width: w, height: h }, Format::R8G8B8A8Unorm, queue.clone())?;
+    let (tex, future) = if mipmap
+    {
+        vkutil::load_texture_mipmapped(queue.clone(), img)?
+    }
+    else
+    {
+        vkutil::load_texture_nomipmap(queue.clone(), img)?
+    };
     future.flush().unwrap();
     Ok(tex)
 }
@@ -292,7 +295,7 @@ fn load_texture_file(queue: Arc<Queue>, tex_name: &str) -> Result<Arc<Texture>, 
 {
     match q3shader::load_image_file(tex_name)
     {
-        Ok(img) => load_texture(queue.clone(), img),
+        Ok(img) => load_texture(queue.clone(), img, false),
         Err(_) => create_fallback_texture(queue.clone()),
     }
 }
@@ -300,11 +303,7 @@ fn load_texture_file(queue: Arc<Queue>, tex_name: &str) -> Result<Arc<Texture>, 
 fn load_lightmap_texture(queue: Arc<Queue>, lightmap: &bsp::Lightmap) -> Result<Arc<Texture>, ImageCreationError>
 {
     let img = ImageBuffer::from_fn(bsp::LIGHTMAP_WIDTH as u32, bsp::LIGHTMAP_HEIGHT as u32, |x,y| { Rgb(color_shift_lighting(lightmap.image[y as usize][x as usize])).to_rgba() });
-    // Perform some image processing to clean up the lightmaps and make them look a bit sharper
-    // let img = image::imageops::resize(&img, bsp::LIGHTMAP_WIDTH as u32 * 4, bsp::LIGHTMAP_HEIGHT as u32 * 4, image::imageops::FilterType::Gaussian);
-    // let img = image::imageops::unsharpen(&img, 0.7, 2);
-    let (w, h) = img.dimensions();
-    let (tex, future) = ImmutableImage::from_iter(img.into_raw().iter().cloned(), Dimensions::Dim2d { width: w, height: h }, Format::R8G8B8A8Unorm, queue.clone())?;
+    let (tex, future) = vkutil::load_texture_nomipmap(queue.clone(), img)?;
     future.flush().unwrap();    // TODO We could probably collect futures and join them all at once instead of going through this sequentially
     Ok(tex)
 }
