@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::cmp::{ min, max };
 
-use cgmath::{ Vector2, Vector3 };
+use cgmath::{ Deg, Vector2, Vector3 };
 use image::{ ImageBuffer, Rgba, Pixel, ImageResult, DynamicImage, RgbaImage, ImageError };
 use image::imageops;
 
@@ -94,6 +94,22 @@ impl Shader
             if tex.map == "$lightmap" || tex.rgb_gen == RgbGen::Entity || tex.rgb_gen == RgbGen::Vertex { return true; }
         }
         false
+    }
+
+    pub fn tex_coord_mod(&self) -> TexCoordModifier
+    {
+        let mut iter = self.textures.iter();
+        let mut result = None;
+        while let Some(tex) = iter.next()
+        {
+            if tex.map.starts_with("$") || tex.blend.is_ignore() { continue; }
+            result = match result
+            {
+                Some(_) => return Default::default(),   // If we have multiple blended layers then tcMod will likely do the wrong thing, so do nothing instead
+                None => Some(tex.tc_mod),
+            };
+        }
+        result.unwrap_or_default()
     }
 }
 
@@ -301,9 +317,10 @@ impl AlphaMask
     pub fn invert(self) -> bool { self == Self::Lt128 }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct TexCoordModifier
 {
+    pub rotate: Deg<f32>,
     pub scroll: Vector2<f32>,
     pub scale: Vector2<f32>,
 }
@@ -314,6 +331,7 @@ impl Default for TexCoordModifier
     {
         TexCoordModifier
         {
+            rotate: Deg(0.0),
             scroll: Vector2::new(0.0, 0.0),
             scale: Vector2::new(1.0, 1.0),
         }
@@ -415,6 +433,25 @@ fn parse_tc_gen(chars: &mut Chars<'_>) -> TexCoordGen
     }
 }
 
+fn next<F>(tokens: &mut std::slice::Iter<String>, default: F) -> F
+    where F: std::str::FromStr
+{
+    tokens.next().cloned().unwrap_or_default().parse::<F>().unwrap_or(default)
+}
+
+fn parse_tc_mod(chars: &mut Chars<'_>, tc_mod: &mut TexCoordModifier)
+{
+    let tokens = parser::tokenize_line(chars);
+    let mut iter = tokens.iter();
+    match iter.next()
+    {
+        Some(token) if token.to_lowercase() == "rotate" => tc_mod.rotate = Deg(next(&mut iter, 0.0)),
+        Some(token) if token.to_lowercase() == "scroll" => tc_mod.scroll = Vector2::new(next(&mut iter, 0.0), next(&mut iter, 0.0)),
+        Some(token) if token.to_lowercase() == "scale" => tc_mod.scale = Vector2::new(next(&mut iter, 1.0), next(&mut iter, 1.0)),
+        _ => { },
+    }
+}
+
 fn parse_rgb_gen(chars: &mut Chars<'_>) -> RgbGen
 {
     match parser::next_token(chars)
@@ -455,6 +492,7 @@ fn parse_texture_map(chars: &mut Chars<'_>) -> Option<TextureMap>
             Some(key) if key.to_lowercase() == "blendfunc" => texture.blend = parse_blend_func(chars),
             Some(key) if key.to_lowercase() == "alphafunc" => texture.mask = parse_alpha_func(chars),
             Some(key) if key.to_lowercase() == "tcgen" => texture.tc_gen = parse_tc_gen(chars),
+            Some(key) if key.to_lowercase() == "tcmod" => parse_tc_mod(chars, &mut texture.tc_mod),
             Some(key) if key.to_lowercase() == "rgbgen" => texture.rgb_gen = parse_rgb_gen(chars),
             Some(_) => continue,
             None => break,

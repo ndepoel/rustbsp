@@ -1,6 +1,6 @@
 use std::str::Chars;
 
-use cgmath::{ Vector3, Zero };
+use cgmath::{ Vector2, Vector3, Zero };
 
 pub fn next_token(chars: &mut Chars<'_>) -> Option<String>
 {
@@ -101,6 +101,15 @@ pub fn parse_vector(string: &str) -> Vector3<f32>
     let mut chars = string.chars();
     Vector3::new(
         next_token(&mut chars).unwrap_or_default().parse::<f32>().unwrap_or_default(),
+        next_token(&mut chars).unwrap_or_default().parse::<f32>().unwrap_or_default(),
+        next_token(&mut chars).unwrap_or_default().parse::<f32>().unwrap_or_default(),
+    )
+}
+
+pub fn parse_vector2(string: &str) -> Vector2<f32>
+{
+    let mut chars = string.chars();
+    Vector2::new(
         next_token(&mut chars).unwrap_or_default().parse::<f32>().unwrap_or_default(),
         next_token(&mut chars).unwrap_or_default().parse::<f32>().unwrap_or_default(),
     )

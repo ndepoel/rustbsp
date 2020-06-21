@@ -143,6 +143,7 @@ struct PlanarSurfaceRenderer
 
     descriptor_set: Arc<dyn DescriptorSet + Sync + Send>,
     is_transparent: bool,
+    tex_coord_mod: q3shader::TexCoordModifier,
 }
 
 struct PatchSurfaceRenderer
@@ -152,6 +153,7 @@ struct PatchSurfaceRenderer
     index_buffer: Arc<ImmutableBuffer<[u32]>>,  // This renderer has its own index buffer, to break apart the surface into separate patches of 9 vertices each
     descriptor_set: Arc<dyn DescriptorSet + Sync + Send>,
     is_transparent: bool,
+    tex_coord_mod: q3shader::TexCoordModifier,
 }
 
 struct SkySurfaceRenderer
@@ -372,10 +374,11 @@ fn create_surface_renderer(
     textures: &TextureArray, lightmaps: &TextureArray, lightgrid_textures: &(Arc<Texture>, Arc<Texture>), fallback_tex: Arc<Texture>,
     pipelines: &mut Pipelines, vertex_slice: Arc<VertexSlice>, index_slice: Arc<IndexSlice>) -> Result<Box<dyn SurfaceRenderer>, PersistentDescriptorSetBuildError>
 {
-    let flags = world.shaders.get(surface.shader_id as usize).and_then(|t| Some(t.surface_flags)).unwrap_or(bsp::SurfaceFlags::empty());
+    let surface_flags = world.shaders.get(surface.shader_id as usize).and_then(|t| Some(t.surface_flags)).unwrap_or(bsp::SurfaceFlags::empty());
     let shader_def = world.shaders.get(surface.shader_id as usize).and_then(|s| shader_defs.get(s.name()));
     let is_transparent = shader_def.as_ref().map(|s| !s.blend_mode().is_opaque()).unwrap_or_default();
-    let pipeline = match pipelines.get(surface, flags, shader_def)
+    let tex_coord_mod = shader_def.as_ref().map(|s| s.tex_coord_mod()).unwrap_or_default();
+    let pipeline = match pipelines.get(surface, surface_flags, shader_def)
     {
         Ok(p) => p,
         Err(_) => { return Ok(Box::new(NoopSurfaceRenderer {})); },
@@ -383,7 +386,7 @@ fn create_surface_renderer(
 
     match surface.surface_type
     {
-        bsp::SurfaceType::Planar if flags.contains(bsp::SurfaceFlags::SKY) =>
+        bsp::SurfaceType::Planar if surface_flags.contains(bsp::SurfaceFlags::SKY) =>
         {
             let layout = pipeline.descriptor_set_layout(1).unwrap();
             let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
@@ -413,6 +416,7 @@ fn create_surface_renderer(
                 index_slice: index_slice.clone(),
                 descriptor_set: descriptor_set.clone(),
                 is_transparent: is_transparent,
+                tex_coord_mod: tex_coord_mod,
             }))
         },
         bsp::SurfaceType::Patch =>
@@ -456,6 +460,7 @@ fn create_surface_renderer(
                 index_buffer: index_buffer.clone(),
                 descriptor_set: descriptor_set.clone(),
                 is_transparent: is_transparent,
+                tex_coord_mod: tex_coord_mod,
             }))
         },
         bsp::SurfaceType::Mesh =>
@@ -474,6 +479,7 @@ fn create_surface_renderer(
                 index_slice: index_slice.clone(),
                 descriptor_set: descriptor_set.clone(),
                 is_transparent: is_transparent,
+                tex_coord_mod: tex_coord_mod,
             }))
         },
         _ => Ok(Box::new(NoopSurfaceRenderer {}))
@@ -835,7 +841,7 @@ impl SurfaceRenderer for PlanarSurfaceRenderer
         // TODO This could possibly be done more efficiently using indirect drawing instead of using buffer slices, but I'm getting stuck with Vulkano's arcane type requirements
         // TODO Look if SyncCommandBufferBuilder can be a valid alternative (split up state binding and draw calls)
         let sets = (uniforms.clone(), self.descriptor_set.clone());
-        let pc = create_vertex_mods(camera.time, cgmath::Deg(0.0), [0.0, 0.0].into(), [1.0, 1.0].into());
+        let pc = create_vertex_mods(camera.time, self.tex_coord_mod.rotate, self.tex_coord_mod.scroll, self.tex_coord_mod.scale);
         builder.draw_indexed(self.pipeline.clone(), &dynamic_state, vec!(self.vertex_slice.clone()), self.index_slice.clone(), sets, pc).unwrap();
     }
 }
@@ -847,7 +853,7 @@ impl SurfaceRenderer for PatchSurfaceRenderer
     fn draw_surface(&self, builder: &mut AutoCommandBufferBuilder, camera: &vkcore::Camera, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
     {
         let sets = (uniforms.clone(), self.descriptor_set.clone());
-        let pc = create_vertex_mods(camera.time, cgmath::Deg(0.0), [0.0, 0.0].into(), [1.0, 1.0].into());
+        let pc = create_vertex_mods(camera.time, self.tex_coord_mod.rotate, self.tex_coord_mod.scroll, self.tex_coord_mod.scale);
         builder.draw_indexed(self.pipeline.clone(), &dynamic_state, vec!(self.vertex_slice.clone()), self.index_buffer.clone(), sets, pc).unwrap();
     }
 }
