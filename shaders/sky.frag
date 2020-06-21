@@ -10,9 +10,11 @@ layout(location = 0) out vec4 f_color;
 
 layout(set = 1, binding = 0) uniform sampler2D mainTex;
 
-layout(push_constant) uniform PushConstantData {
-    vec2 scroll;
-    vec2 scale;
+layout(push_constant) uniform VertexMods
+{
+    float tc_rotate;
+    vec2 tc_scroll;
+    vec2 tc_scale;
 } pc;
 
 vec2 vec_to_latlng(vec3 v)
@@ -28,8 +30,8 @@ void main() {
     vec2 uv = vec_to_latlng(v_view_ray);
     
     // Modify sky texture coords to create a scrolling effect
-    uv += pc.scroll;
-    uv *= pc.scale;
+    uv += pc.tc_scroll;
+    uv *= pc.tc_scale;
 
     f_color = texture(mainTex, -uv);
 }

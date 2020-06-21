@@ -829,13 +829,14 @@ impl SurfaceRenderer for PlanarSurfaceRenderer
 {
     fn is_transparent(&self) -> bool { self.is_transparent }
 
-    fn draw_surface(&self, builder: &mut AutoCommandBufferBuilder, _camera: &vkcore::Camera, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
+    fn draw_surface(&self, builder: &mut AutoCommandBufferBuilder, camera: &vkcore::Camera, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
     {
         // TODO Building secondary command buffers per surface or leaf would probably speed this up a whole lot => tried it, but you can't pass dynamic state or per-frame uniforms to a pre-built secondary command buffer :/
         // TODO This could possibly be done more efficiently using indirect drawing instead of using buffer slices, but I'm getting stuck with Vulkano's arcane type requirements
         // TODO Look if SyncCommandBufferBuilder can be a valid alternative (split up state binding and draw calls)
         let sets = (uniforms.clone(), self.descriptor_set.clone());
-        builder.draw_indexed(self.pipeline.clone(), &dynamic_state, vec!(self.vertex_slice.clone()), self.index_slice.clone(), sets, ()).unwrap();
+        let pc = create_vertex_mods(camera.time, cgmath::Deg(0.0), [0.0, 0.0].into(), [1.0, 1.0].into());
+        builder.draw_indexed(self.pipeline.clone(), &dynamic_state, vec!(self.vertex_slice.clone()), self.index_slice.clone(), sets, pc).unwrap();
     }
 }
 
@@ -843,10 +844,11 @@ impl SurfaceRenderer for PatchSurfaceRenderer
 {
     fn is_transparent(&self) -> bool { self.is_transparent }
 
-    fn draw_surface(&self, builder: &mut AutoCommandBufferBuilder, _camera: &vkcore::Camera, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
+    fn draw_surface(&self, builder: &mut AutoCommandBufferBuilder, camera: &vkcore::Camera, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
     {
         let sets = (uniforms.clone(), self.descriptor_set.clone());
-        builder.draw_indexed(self.pipeline.clone(), &dynamic_state, vec!(self.vertex_slice.clone()), self.index_buffer.clone(), sets, ()).unwrap();
+        let pc = create_vertex_mods(camera.time, cgmath::Deg(0.0), [0.0, 0.0].into(), [1.0, 1.0].into());
+        builder.draw_indexed(self.pipeline.clone(), &dynamic_state, vec!(self.vertex_slice.clone()), self.index_buffer.clone(), sets, pc).unwrap();
     }
 }
 
@@ -857,13 +859,19 @@ impl SurfaceRenderer for SkySurfaceRenderer
     fn draw_surface(&self, builder: &mut AutoCommandBufferBuilder, camera: &vkcore::Camera, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
     {
         let sets = (uniforms.clone(), self.descriptor_set.clone());
-        
-        let pc = sky_fs::ty::PushConstantData
-        {
-            scroll: [0.05 * camera.time, 0.1 * camera.time],
-            scale: [3.0, 2.0],
-        };
-
+        let pc = create_vertex_mods(camera.time, cgmath::Deg(0.0), [0.05, 0.1].into(), [3.0, 2.0].into());
         builder.draw_indexed(self.pipeline.clone(), &dynamic_state, vec!(self.vertex_slice.clone()), self.index_slice.clone(), sets, pc).unwrap();
+    }
+}
+
+fn create_vertex_mods(time: f32, tc_rotate: cgmath::Deg<f32>, tc_scroll: cgmath::Vector2<f32>, tc_scale: cgmath::Vector2<f32>) -> vs::ty::VertexMods
+{
+    // TODO: we can probably replace all of tcMod with a single 3x3 matrix (see tcMod <transform>)
+    vs::ty::VertexMods
+    {
+        tc_rotate: cgmath::Rad::from(tc_rotate).0 * time,
+        tc_scroll: (tc_scroll * time).into(),
+        tc_scale: tc_scale.into(),
+        _dummy0: Default::default(),
     }
 }
