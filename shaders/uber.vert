@@ -31,7 +31,16 @@ void main() {
     gl_Position = uniforms.proj * viewpos;
 
     v_normal = transpose(inverse(mat3(uniforms.model))) * normal;
-    v_tex_uv = (texture_coord + pc.tc_scroll) * pc.tc_scale;
+
+    // Apply texture coordinate rotation
+    float sin_rot = sin(pc.tc_rotate);
+    float cos_rot = cos(pc.tc_rotate);
+    vec2 uv_dir = texture_coord - vec2(0.5, 0.5);
+    v_tex_uv.x = cos_rot * uv_dir.x - sin_rot * uv_dir.y;
+    v_tex_uv.y = sin_rot * uv_dir.x + cos_rot * uv_dir.y;
+    v_tex_uv = vec2(0.5, 0.5) + v_tex_uv;
+
+    v_tex_uv = (v_tex_uv + pc.tc_scroll) * pc.tc_scale;
     v_lightmap_uv = lightmap_coord;
     v_lightgrid_uv = (uniforms.lightgrid * worldpos).xyz;
 
