@@ -438,7 +438,7 @@ fn create_surface_renderer(
             let layout = pipeline.descriptor_set_layout(1).unwrap();
             let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
                 .add_sampled_image(textures.get(surface.shader_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
-                .add_sampled_image(lightmaps.get(surface.lightmap_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
+                .add_sampled_image(lightmaps.get(surface.lightmap_id as usize).unwrap_or(&fallback_tex).clone(), samplers.clamp.clone()).unwrap()
                 .build()?);
 
             Ok(Box::new(PlanarSurfaceRenderer
@@ -482,7 +482,7 @@ fn create_surface_renderer(
             let layout = pipeline.descriptor_set_layout(1).unwrap();
             let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
                 .add_sampled_image(textures.get(surface.shader_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
-                .add_sampled_image(lightmaps.get(surface.lightmap_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
+                .add_sampled_image(lightmaps.get(surface.lightmap_id as usize).unwrap_or(&fallback_tex).clone(), samplers.clamp.clone()).unwrap()
                 .build()?);
 
             Ok(Box::new(PatchSurfaceRenderer
@@ -500,8 +500,8 @@ fn create_surface_renderer(
             let layout = pipeline.descriptor_set_layout(1).unwrap();
             let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
                 .add_sampled_image(textures.get(surface.shader_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
-                .add_sampled_image(lightgrid_textures.0.clone(), sampler.clone()).unwrap()
-                .add_sampled_image(lightgrid_textures.1.clone(), sampler.clone()).unwrap()
+                .add_sampled_image(lightgrid_textures.0.clone(), samplers.clamp.clone()).unwrap()
+                .add_sampled_image(lightgrid_textures.1.clone(), samplers.clamp.clone()).unwrap()
                 .build()?);
 
             Ok(Box::new(MeshSurfaceRenderer
