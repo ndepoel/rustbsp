@@ -118,6 +118,12 @@ struct Pipelines
     pipelines: HashMap<u64, Arc<dyn GraphicsPipelineAbstract + Send + Sync>>,
 }
 
+struct Samplers
+{
+    repeat: Arc<Sampler>,
+    clamp: Arc<Sampler>,
+}
+
 type VertexSlice = BufferSlice<[bsp::Vertex], Arc<ImmutableBuffer<[bsp::Vertex]>>>;
 type IndexSlice = BufferSlice<[u32], Arc<ImmutableBuffer<[u32]>>>;
 type Texture = dyn ImageViewAccess + Send + Sync;
@@ -188,10 +194,17 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
 
     let vs_uniform_buffer = CpuBufferPool::<vs::ty::Data>::new(device.clone(), BufferUsage::uniform_buffer());
 
-    let sampler = Sampler::new(device.clone(), 
-        Filter::Linear, Filter::Linear, MipmapMode::Linear,
-        SamplerAddressMode::Repeat, SamplerAddressMode::Repeat, SamplerAddressMode::Repeat,
-        0.0, 16.0, 0.0, 0.0).unwrap();
+    let samplers = Samplers
+    {
+        repeat: Sampler::new(device.clone(), 
+            Filter::Linear, Filter::Linear, MipmapMode::Linear,
+            SamplerAddressMode::Repeat, SamplerAddressMode::Repeat, SamplerAddressMode::Repeat,
+            0.0, 16.0, 0.0, 0.0).unwrap(),
+        clamp: Sampler::new(device.clone(), 
+            Filter::Linear, Filter::Linear, MipmapMode::Linear,
+            SamplerAddressMode::ClampToEdge, SamplerAddressMode::ClampToEdge, SamplerAddressMode::ClampToEdge,
+            0.0, 16.0, 0.0, 0.0).unwrap(),
+    };
 
     let fallback_tex = create_fallback_texture(queue.clone()).unwrap();
 
@@ -237,7 +250,7 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
 
         surface_renderers.push(create_surface_renderer(
             &world, &surface, &shader_defs,
-            queue.clone(), sampler.clone(), 
+            queue.clone(), &samplers,
             &textures, &lightmaps, &lightgrid_textures, fallback_tex.clone(), 
             &mut pipelines, vertex_slice.clone(), index_slice.clone()
         ).unwrap());
@@ -370,7 +383,7 @@ fn color_shift_lighting(bytes: [u8; 3]) -> [u8; 3]
 
 fn create_surface_renderer(
     world: &bsp::World, surface: &bsp::Surface, shader_defs: &HashMap<String, q3shader::Shader>,
-    queue: Arc<Queue>, sampler: Arc<Sampler>,
+    queue: Arc<Queue>, samplers: &Samplers,
     textures: &TextureArray, lightmaps: &TextureArray, lightgrid_textures: &(Arc<Texture>, Arc<Texture>), fallback_tex: Arc<Texture>,
     pipelines: &mut Pipelines, vertex_slice: Arc<VertexSlice>, index_slice: Arc<IndexSlice>) -> Result<Box<dyn SurfaceRenderer>, PersistentDescriptorSetBuildError>
 {
@@ -378,6 +391,7 @@ fn create_surface_renderer(
     let content_flags = world.shaders.get(surface.shader_id as usize).and_then(|t| Some(t.content_flags)).unwrap_or(bsp::ContentFlags::empty());
     let shader_def = world.shaders.get(surface.shader_id as usize).and_then(|s| shader_defs.get(s.name()));
     let is_transparent = shader_def.as_ref().map(|s| !s.blend_mode().is_opaque()).unwrap_or_default();
+    let wrap_mode = shader_def.as_ref().map(|s| s.wrap_mode()).unwrap_or_default();
 
     // Apply texture coordinate animations only on surfaces with specific properties (in particular: liquid surfaces and transparent effects).
     // Some solid surfaces have animated background layers and those will look all wrong with the current setup, so we have to cleverly filter them out.
@@ -394,6 +408,12 @@ fn create_surface_renderer(
     {
         Ok(p) => p,
         Err(_) => { return Ok(Box::new(NoopSurfaceRenderer {})); },
+    };
+
+    let sampler = match wrap_mode
+    {
+        q3shader::WrapMode::Repeat => samplers.repeat.clone(),
+        q3shader::WrapMode::Clamp => samplers.clamp.clone(),
     };
 
     match surface.surface_type

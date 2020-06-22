@@ -106,6 +106,17 @@ impl Shader
         }
         Default::default()
     }
+
+    pub fn wrap_mode(&self) -> WrapMode
+    {
+        let mut iter = self.textures.iter();
+        while let Some(tex) = iter.next()
+        {
+            if tex.map.starts_with("$") || tex.blend.is_ignore() { continue; }
+            return tex.wrap;
+        }
+        Default::default()
+    }
 }
 
 pub fn load_image_file(tex_name: &str) -> ImageResult<RgbaImage>
@@ -178,6 +189,7 @@ pub struct TextureMap
 {
     pub map: String,
     pub animation: Option<Animation>,
+    pub wrap: WrapMode,
     pub blend: BlendMode,
     pub mask: AlphaMask,
     pub tc_gen: TexCoordGen,
@@ -190,6 +202,18 @@ pub struct Animation
 {
     pub frames: Vec<String>,
     pub frequency: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WrapMode
+{
+    Repeat,
+    Clamp
+}
+
+impl Default for WrapMode
+{
+    fn default() -> Self { Self::Repeat }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -472,7 +496,8 @@ fn parse_texture_map(chars: &mut Chars<'_>) -> Option<TextureMap>
         match parser::next_token(chars)
         {
             Some(token) if token == "}" => break,
-            Some(key) if key.to_lowercase() == "map" || key.to_lowercase() == "clampmap" => texture.map = parser::next_token(chars).unwrap_or_default(),
+            Some(key) if key.to_lowercase() == "map" => texture.map = parser::next_token(chars).unwrap_or_default(),
+            Some(key) if key.to_lowercase() == "clampmap" => { texture.map = parser::next_token(chars).unwrap_or_default(); texture.wrap = WrapMode::Clamp; },
             Some(key) if key.to_lowercase() == "animmap" =>
             { 
                 let freq = parser::next_token(chars).unwrap_or_default().parse::<f32>().unwrap_or_default();
