@@ -375,9 +375,21 @@ fn create_surface_renderer(
     pipelines: &mut Pipelines, vertex_slice: Arc<VertexSlice>, index_slice: Arc<IndexSlice>) -> Result<Box<dyn SurfaceRenderer>, PersistentDescriptorSetBuildError>
 {
     let surface_flags = world.shaders.get(surface.shader_id as usize).and_then(|t| Some(t.surface_flags)).unwrap_or(bsp::SurfaceFlags::empty());
+    let content_flags = world.shaders.get(surface.shader_id as usize).and_then(|t| Some(t.content_flags)).unwrap_or(bsp::ContentFlags::empty());
     let shader_def = world.shaders.get(surface.shader_id as usize).and_then(|s| shader_defs.get(s.name()));
     let is_transparent = shader_def.as_ref().map(|s| !s.blend_mode().is_opaque()).unwrap_or_default();
-    let tex_coord_mod = shader_def.as_ref().map(|s| s.tex_coord_mod()).unwrap_or_default();
+
+    // Apply texture coordinate animations only on surfaces with specific properties (in particular: liquid surfaces and transparent effects).
+    // Some solid surfaces have animated background layers and those will look all wrong with the current setup, so we have to cleverly filter them out.
+    let cull_mode = shader_def.map(|s| s.cull).unwrap_or_default();
+    let alpha_mask = shader_def.map(|s| s.alpha_mask()).unwrap_or_default();
+    let tex_coord_mod = if (cull_mode == q3shader::CullMode::None && alpha_mask == q3shader::AlphaMask::None) || 
+        content_flags.intersects(bsp::ContentFlags::LAVA | bsp::ContentFlags::SLIME | bsp::ContentFlags::WATER | bsp::ContentFlags::TELEPORTER | bsp::ContentFlags::TRANSLUCENT) {
+        shader_def.as_ref().map(|s| s.tex_coord_mod()).unwrap_or_default()
+    } else {
+        Default::default()
+    };
+    
     let pipeline = match pipelines.get(surface, surface_flags, shader_def)
     {
         Ok(p) => p,

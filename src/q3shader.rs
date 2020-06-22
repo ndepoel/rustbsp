@@ -99,17 +99,12 @@ impl Shader
     pub fn tex_coord_mod(&self) -> TexCoordModifier
     {
         let mut iter = self.textures.iter();
-        let mut result = None;
         while let Some(tex) = iter.next()
         {
             if tex.map.starts_with("$") || tex.blend.is_ignore() { continue; }
-            result = match result
-            {
-                Some(_) => return Default::default(),   // If we have multiple blended layers then tcMod will likely do the wrong thing, so do nothing instead
-                None => Some(tex.tc_mod),
-            };
+            return tex.tc_mod;
         }
-        result.unwrap_or_default()
+        Default::default()
     }
 }
 
