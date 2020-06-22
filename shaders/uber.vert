@@ -32,15 +32,16 @@ void main() {
 
     v_normal = transpose(inverse(mat3(uniforms.model))) * normal;
 
-    // Apply texture coordinate rotation
+    // Create a transformation that contains all of the texture coordinate modifiers (TODO this can be done on the CPU for all vertices)
     float sin_rot = sin(pc.tc_rotate);
     float cos_rot = cos(pc.tc_rotate);
-    vec2 uv_dir = texture_coord - vec2(0.5, 0.5);
-    v_tex_uv.x = cos_rot * uv_dir.x - sin_rot * uv_dir.y;
-    v_tex_uv.y = sin_rot * uv_dir.x + cos_rot * uv_dir.y;
-    v_tex_uv = vec2(0.5, 0.5) + v_tex_uv;
+    vec3 tu = pc.tc_scale.x * vec3(cos_rot, -sin_rot, pc.tc_scroll.x);
+    vec3 tv = pc.tc_scale.y * vec3(sin_rot, cos_rot, pc.tc_scroll.y);
 
-    v_tex_uv = (v_tex_uv + pc.tc_scroll) * pc.tc_scale;
+    // For rotation to work correctly, we need to move the texture coordinates around a pivot in the center of the texture (i.e. 0.5, 0.5)
+    vec3 uv_dir = vec3(texture_coord - 0.5, 1);
+    v_tex_uv = vec2(dot(uv_dir, tu), dot(uv_dir, tv)) + 0.5;
+
     v_lightmap_uv = lightmap_coord;
     v_lightgrid_uv = (uniforms.lightgrid * worldpos).xyz;
 
