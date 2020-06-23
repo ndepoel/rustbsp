@@ -26,33 +26,10 @@ impl Shader
         while let Some(tex) = iter.next()
         {
             // Skip environment maps and things like $lightmap
-            if tex.map.starts_with("$") || tex.tc_gen != TexCoordGen::Base
-            {
-                continue;
-            }
+            if tex.map.starts_with("$") || tex.tc_gen != TexCoordGen::Base { continue; }
 
-            let mut img = load_image_file(&tex.map)?;
-            let (w, h) = img.dimensions();
-
-            if composite.is_some()
-            {
-                // Make sure the two images match in size before compositing
-                let (cw, ch) = composite.as_ref().unwrap().dimensions();
-                if w != cw || h != ch
-                {
-                    let max_w = max(w, cw);
-                    let max_h = max(h, ch);
-                    img = imageops::resize(&img, max_w, max_h, imageops::FilterType::Triangle);
-                    composite = Some(imageops::resize(composite.as_ref().unwrap(), max_w, max_h, imageops::FilterType::Triangle));
-                }
-
-                // Combine the two texture maps together
-                tex.blend.apply(composite.as_mut().unwrap(), &img, 0, 0);
-            }
-            else
-            {
-                composite = Some(img);
-            }
+            let img = load_image_file(&tex.map)?;
+            composite = Some(Self::compose_images(&tex, composite, img));
         }
 
         match composite
@@ -116,6 +93,43 @@ impl Shader
             return tex.wrap;
         }
         Default::default()
+    }
+
+    pub fn is_animated(&self) -> bool
+    {
+        let mut iter = self.textures.iter();
+        while let Some(tex) = iter.next()
+        {
+            if tex.map.starts_with("$") || tex.blend.is_ignore() { continue; }
+            return tex.animation.is_some();
+        }
+        false
+    }
+
+    fn compose_images(map: &TextureMap, base: Option<RgbaImage>, img: RgbaImage) -> RgbaImage
+    {
+        match base
+        {
+            Some(mut composite) =>
+            {
+                // Make sure the two images match in size before compositing
+                let mut top = img;
+                let (tw, th) = top.dimensions();
+                let (cw, ch) = composite.dimensions();
+                if tw != cw || th != ch
+                {
+                    let max_w = max(tw, cw);
+                    let max_h = max(th, ch);
+                    top = imageops::resize(&top, max_w, max_h, imageops::FilterType::Triangle);
+                    composite = imageops::resize(&composite, max_w, max_h, imageops::FilterType::Triangle);
+                }
+
+                // Combine the two texture maps together
+                map.blend.apply(&mut composite, &top, 0, 0);
+                composite
+            },
+            None => img
+        }
     }
 }
 
