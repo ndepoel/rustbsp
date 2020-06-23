@@ -2,6 +2,7 @@ use std::str::Chars;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::cmp::{ min, max };
+use std::iter::{ repeat, Iterator, FromIterator };
 
 use cgmath::{ Deg, Vector2, Vector3 };
 use image::{ ImageBuffer, Rgba, Pixel, ImageResult, DynamicImage, RgbaImage, ImageError };
@@ -29,7 +30,7 @@ impl Shader
             if tex.map.starts_with("$") || tex.tc_gen != TexCoordGen::Base { continue; }
 
             let img = load_image_file(&tex.map)?;
-            composite = Some(Self::compose_images(&tex, composite, img));
+            composite = Some(Self::compose_images(composite, img, tex.blend));
         }
 
         match composite
@@ -37,6 +38,52 @@ impl Shader
             Some(image) => Ok(image),
             _ => load_image_file(&self.name),
         }
+    }
+
+    pub fn load_animation(&self) -> ImageResult<(RgbaImage, Vec<(Vector2<f32>, Vector2<f32>)>)>
+    {
+        // Gather information about how the different layers should be combined for each frame
+        let layers = self.zip_frames();
+
+        // Combine the layers together to create a single sequence of frames
+        let num_frames = layers.get(0).map(|layer| layer.0.len()).unwrap_or_default();
+        let mut frames = Vec::new();
+        for i in 0..num_frames
+        {
+            let mut composite: Option<RgbaImage> = None;
+            for layer in layers.iter()
+            {
+                match load_image_file(&(layer.0)[i])
+                {
+                    Ok(img) => composite = Some(Self::compose_images(composite, img, layer.1)),
+                    _ => { },
+                }
+            }
+
+            match composite
+            {
+                Some(image) => frames.push(image),
+                _ => { },
+            }
+        }
+
+        // Combine the sequence of frames together into a single atlas image
+        let sum_w: u32 = frames.iter().map(|frame| frame.dimensions().0).sum();
+        let max_h = frames.iter().map(|frame| frame.dimensions().1).max().unwrap_or_default();
+        let mut atlas = RgbaImage::new(sum_w, max_h);
+        let mut coords = Vec::new();
+        let mut x = 0u32;
+        for frame in frames.into_iter()
+        {
+            let (w, h) = frame.dimensions();
+            imageops::replace(&mut atlas, &frame, x, 0);
+            let offset = Vector2::new(x as f32 / sum_w as f32, 0.0);
+            let scale = Vector2::new(w as f32 / sum_w as f32, h as f32 / max_h as f32);
+            coords.push((scale, offset));
+            x = x + frame.dimensions().0;
+        }
+
+        Ok((atlas, coords))
     }
 
     pub fn blend_mode(&self) -> BlendMode
@@ -106,7 +153,7 @@ impl Shader
         false
     }
 
-    fn compose_images(map: &TextureMap, base: Option<RgbaImage>, img: RgbaImage) -> RgbaImage
+    fn compose_images(base: Option<RgbaImage>, img: RgbaImage, blend: BlendMode) -> RgbaImage
     {
         match base
         {
@@ -125,11 +172,48 @@ impl Shader
                 }
 
                 // Combine the two texture maps together
-                map.blend.apply(&mut composite, &top, 0, 0);
+                blend.apply(&mut composite, &top, 0, 0);
                 composite
             },
             None => img
         }
+    }
+
+    // Creates a list of animation frames per texture layers, such that all layers have the same number of frames in them.
+    // This will repeat frames as necessary to ensure all layers have the same number of frames.
+    fn zip_frames(&self) -> Vec<(Vec<String>, BlendMode)>
+    {
+        let max_frames = self.textures.iter().map(|t|
+        {
+            match &t.animation
+            {
+                Some(anim) => anim.frames.len(),
+                None => 1,
+            }
+        }).max().unwrap_or_default();
+
+        let mut result = Vec::new();
+        for tex in self.textures.iter()
+        {
+            // Skip environment maps and things like $lightmap
+            if tex.map.starts_with("$") || tex.tc_gen != TexCoordGen::Base { continue; }
+
+            result.push((match &tex.animation
+            {
+                Some(anim) => 
+                {
+                    let mut frames = anim.frames.clone();
+                    if frames.len() < max_frames
+                    {
+                        // Repeat the last frame to fill up the missing frames
+                        frames.extend(repeat(frames.last().cloned().unwrap_or_default()).take(max_frames - frames.len()));
+                    }
+                    frames
+                },
+                None => Vec::from_iter(repeat(tex.map.clone()).take(max_frames)),
+            }, tex.blend));
+        }
+        result
     }
 }
 
