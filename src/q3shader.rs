@@ -40,30 +40,28 @@ impl Shader
         }
     }
 
-    pub fn load_animation(&self) -> ImageResult<(RgbaImage, Vec<(Vector2<f32>, Vector2<f32>)>)>
+    pub fn load_animation(&self) -> ImageResult<(RgbaImage, f32, Vec<(Vector2<f32>, Vector2<f32>)>)>
     {
         // Gather information about how the different layers should be combined for each frame
         let layers = self.zip_frames();
 
         // Combine the layers together to create a single sequence of frames
-        let num_frames = layers.get(0).map(|layer| layer.0.len()).unwrap_or_default();
+        let (num_frames, frequency) = layers.get(0).map(|layer| (layer.0.len(), layer.1)).unwrap_or_default();
         let mut frames = Vec::new();
         for i in 0..num_frames
         {
             let mut composite: Option<RgbaImage> = None;
             for layer in layers.iter()
             {
-                match load_image_file(&(layer.0)[i])
+                if let Ok(img) = load_image_file(&(layer.0)[i])
                 {
-                    Ok(img) => composite = Some(Self::compose_images(composite, img, layer.1)),
-                    _ => { },
+                    composite = Some(Self::compose_images(composite, img, layer.2));
                 }
             }
 
-            match composite
+            if let Some(image) = composite
             {
-                Some(image) => frames.push(image),
-                _ => { },
+                frames.push(image);
             }
         }
 
@@ -83,7 +81,8 @@ impl Shader
             x = x + frame.dimensions().0;
         }
 
-        Ok((atlas, coords))
+        let speed = frequency / num_frames as f32;
+        Ok((atlas, speed, coords))
     }
 
     pub fn blend_mode(&self) -> BlendMode
@@ -181,7 +180,7 @@ impl Shader
 
     // Creates a list of animation frames per texture layers, such that all layers have the same number of frames in them.
     // This will repeat frames as necessary to ensure all layers have the same number of frames.
-    fn zip_frames(&self) -> Vec<(Vec<String>, BlendMode)>
+    fn zip_frames(&self) -> Vec<(Vec<String>, f32, BlendMode)>
     {
         let max_frames = self.textures.iter().map(|t|
         {
@@ -198,10 +197,12 @@ impl Shader
             // Skip environment maps and things like $lightmap
             if tex.map.starts_with("$") || tex.tc_gen != TexCoordGen::Base { continue; }
 
+            let mut frequency = 0.0;
             result.push((match &tex.animation
             {
                 Some(anim) => 
                 {
+                    frequency = anim.frequency;
                     let mut frames = anim.frames.clone();
                     if frames.len() < max_frames
                     {
@@ -211,7 +212,7 @@ impl Shader
                     frames
                 },
                 None => Vec::from_iter(repeat(tex.map.clone()).take(max_frames)),
-            }, tex.blend));
+            }, frequency, tex.blend));
         }
         result
     }
