@@ -32,9 +32,10 @@ void main() {
     v_normal = transpose(inverse(mat3(uniforms.model))) * normal;
 
     // For rotation to work correctly, we need to move the texture coordinates around a pivot in the center of the texture (i.e. 0.5, 0.5)
-    vec3 uv_pivot = vec3(0.5, 0.5, 0);  // TODO: this currently doesn't play nice with animated textures, as the pivot ought to be scaled as well
-    vec3 uv_dir = vec3(texture_coord, 1) - uv_pivot;
-    v_tex_uv = vec2(dot(uv_dir, pc.tcmod_u), dot(uv_dir, pc.tcmod_v)) + uv_pivot.xy;
+    vec2 uv_pivot = vec2(0.5, 0.5);
+    vec3 uv_dir = vec3(texture_coord - uv_pivot, 1);
+    vec2 tc_scale = vec2(length(vec2(pc.tcmod_u.x, pc.tcmod_v.x)), length(vec2(pc.tcmod_u.y, pc.tcmod_v.y)));   // Isolate the UV scale so we can scale the pivot position accordingly
+    v_tex_uv = vec2(dot(uv_dir, pc.tcmod_u), dot(uv_dir, pc.tcmod_v)) + tc_scale * uv_pivot;
 
     v_lightmap_uv = lightmap_coord;
     v_lightgrid_uv = (uniforms.lightgrid * worldpos).xyz;
