@@ -147,7 +147,7 @@ trait TexCoordModifier
 struct AnimatedTexture
 {
     image: Arc<TextureImage>,
-    animation_speed: f32,
+    frequency: f32,
     tex_coord_mod: Vec<(Vector2<f32>, Vector2<f32>)>,   // Scale and offset per animation frame
 }
 
@@ -162,7 +162,7 @@ impl AnimatedTexture
             return (Vector2::new(0.0, 0.0), Vector2::new(1.0, 1.0));
         }
 
-        let frame = (self.animation_speed * time) as usize % self.tex_coord_mod.len();
+        let frame = (self.frequency * time) as usize % self.tex_coord_mod.len();
         self.tex_coord_mod[frame]
     }
 }
@@ -296,7 +296,7 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
             {
                 match shader_def.load_animation()
                 {
-                    Ok((img, speed, coords)) => load_animated_texture(queue.clone(), img, speed, coords).unwrap(),
+                    Ok((img, freq, coords)) => load_animated_texture(queue.clone(), img, freq, coords).unwrap(),
                     _ => load_texture_file(queue.clone(), shader.name()).unwrap(),
                 }
             },
@@ -394,7 +394,7 @@ fn load_texture(queue: Arc<Queue>, img: RgbaImage, mipmap: bool) -> Result<Box<d
     Ok(Box::new(tex) as Box<_>)
 }
 
-fn load_animated_texture(queue: Arc<Queue>, img: RgbaImage, animation_speed: f32, tex_coord_mod: Vec<(Vector2<f32>, Vector2<f32>)>) -> Result<Box<dyn Texture>, ImageCreationError>
+fn load_animated_texture(queue: Arc<Queue>, img: RgbaImage, frequency: f32, tex_coord_mod: Vec<(Vector2<f32>, Vector2<f32>)>) -> Result<Box<dyn Texture>, ImageCreationError>
 {
     let (tex, future) = vkutil::load_texture_nomipmap(queue.clone(), img)?;
     future.flush().unwrap();
@@ -402,7 +402,7 @@ fn load_animated_texture(queue: Arc<Queue>, img: RgbaImage, animation_speed: f32
     Ok(Box::new(AnimatedTexture
     { 
         image: tex,
-        animation_speed: animation_speed,
+        frequency: frequency,
         tex_coord_mod: tex_coord_mod,
     }) as Box<_>)
 }
