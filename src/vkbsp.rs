@@ -24,6 +24,7 @@ use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::Hasher;
 
+use cgmath::{ Vector2, Vector3, Matrix4, Deg, Rad };
 use cgmath::prelude::*;
 
 use super::vkcore;
@@ -95,7 +96,7 @@ struct BspRenderer
 
     vs_uniform_buffer: Arc<CpuBufferPool::<vs::ty::Data>>,
 
-    lightgrid_transform: cgmath::Matrix4::<f32>,
+    lightgrid_transform: Matrix4::<f32>,
 
     surface_renderers: Vec<Box<dyn SurfaceRenderer>>,
 }
@@ -124,10 +125,78 @@ struct Samplers
     clamp: Arc<Sampler>,
 }
 
+// These type designations are NOT nice, but using a BufferAccess trait here didn't cut it
 type VertexSlice = BufferSlice<[bsp::Vertex], Arc<ImmutableBuffer<[bsp::Vertex]>>>;
 type IndexSlice = BufferSlice<[u32], Arc<ImmutableBuffer<[u32]>>>;
-type Texture = dyn ImageViewAccess + Send + Sync;
-type TextureArray = Vec<Arc<Texture>>;
+type TextureImage = dyn ImageViewAccess + Send + Sync;
+type TextureArray = Vec<Box<dyn Texture>>;
+
+trait Texture
+{
+    fn get_image(&self) -> Arc<TextureImage>;
+}
+
+trait TexCoordModifier
+{
+    // Returns a 3x2 transformation matrix in the form of two row vectors (u-transform and v-transform)
+    fn get_texcoord_transform(&self, time: f32) -> (Vector3<f32>, Vector3<f32>);
+}
+
+#[derive(Clone)]
+struct AnimatedTexture
+{
+    image: Arc<TextureImage>,
+    animation_speed: f32,
+    tex_coord_mod: Vec<(Vector2<f32>, Vector2<f32>)>,   // Scale and offset per animation frame
+}
+
+impl AnimatedTexture
+{
+    fn is_animated(&self) -> bool { !self.tex_coord_mod.is_empty() }
+
+    fn get_frame(&self, time: f32) -> (Vector2<f32>, Vector2<f32>)
+    {
+        if !self.is_animated()
+        {
+            return (Vector2::new(0.0, 0.0), Vector2::new(1.0, 1.0));
+        }
+
+        let frame = (self.animation_speed * time) as usize % self.tex_coord_mod.len();
+        self.tex_coord_mod[frame]
+    }
+}
+
+impl Texture for AnimatedTexture
+{
+    fn get_image(&self) -> Arc<TextureImage> { self.image.clone() }
+}
+
+impl Texture for Arc<TextureImage>
+{
+    fn get_image(&self) -> Arc<TextureImage> { self.clone() }
+}
+
+impl TexCoordModifier for AnimatedTexture
+{
+    fn get_texcoord_transform(&self, time: f32) -> (Vector3<f32>, Vector3<f32>)
+    {
+        let (offset, scale) = self.get_frame(time);
+        (Vector3::new(scale.x, 0.0, offset.x), Vector3::new(0.0, scale.y, offset.y))
+    }
+}
+
+impl TexCoordModifier for q3shader::TexCoordModifier
+{
+    fn get_texcoord_transform(&self, time: f32) -> (Vector3<f32>, Vector3<f32>)
+    {
+        let rotate = Rad::from(self.rotate).0 * time;
+        let scroll = self.scroll * time;
+
+        let sin_rot = rotate.sin();
+        let cos_rot = rotate.cos();
+        (Vector3::new(cos_rot, -sin_rot, scroll.x) * self.scale.x, Vector3::new(sin_rot, cos_rot, scroll.y) * self.scale.y)
+    }
+}
 
 trait SurfaceRenderer
 {
@@ -142,11 +211,8 @@ struct NoopSurfaceRenderer
 struct PlanarSurfaceRenderer
 {
     pipeline: Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
-
-    // These type designations are NOT nice, but using a BufferAccess trait here didn't cut it
     vertex_slice: Arc<VertexSlice>,
     index_slice: Arc<IndexSlice>,
-
     descriptor_set: Arc<dyn DescriptorSet + Sync + Send>,
     is_transparent: bool,
     tex_coord_mod: q3shader::TexCoordModifier,
@@ -213,14 +279,23 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
     {
         textures.push(match shader_defs.get(shader.name())
         {
-            Some(shader_def) => {
+            Some(shader_def) if shader_def.is_animated() =>
+            {
+                match shader_def.load_animation()
+                {
+                    Ok((img, speed, coords)) => load_animated_texture(queue.clone(), img, speed, coords).unwrap(),
+                    _ => load_texture_file(queue.clone(), shader.name()).unwrap(),
+                }
+            },
+            Some(shader_def) =>
+            {
                 // Some textures are referenced through a shader definition
                 match shader_def.load_image()
                 {
                     Ok(img) => load_texture(queue.clone(), img, false).unwrap(),
                     _ => load_texture_file(queue.clone(), shader.name()).unwrap()
                 }
-            }
+            },
             _ => {
                 // Some textures are referenced directly by their file name
                 load_texture_file(queue.clone(), shader.name()).unwrap()
@@ -236,7 +311,7 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
 
     let (dimensions, lightgrid_offset, lightgrid_scale) = world.lightgrid_dimensions();
     let lightgrid_textures = create_lightgrid_textures(queue.clone(), dimensions, &world.light_volumes).unwrap();
-    let lightgrid_transform = cgmath::Matrix4::from_nonuniform_scale(lightgrid_scale.x, lightgrid_scale.y, lightgrid_scale.z) * cgmath::Matrix4::from_translation(lightgrid_offset);
+    let lightgrid_transform = Matrix4::from_nonuniform_scale(lightgrid_scale.x, lightgrid_scale.y, lightgrid_scale.z) * Matrix4::from_translation(lightgrid_offset);
 
     let mut surface_renderers = Vec::with_capacity(world.surfaces.len());
     for surface in &world.surfaces
@@ -272,7 +347,7 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderP
     }
 }
 
-fn create_fallback_texture(queue: Arc<Queue>) -> Result<Arc<Texture>, ImageCreationError>
+fn create_fallback_texture(queue: Arc<Queue>) -> Result<Arc<TextureImage>, ImageCreationError>
 {
     let mut buf = [0u8; 64 * 64 * 4];
     for y in 0..64
@@ -292,7 +367,7 @@ fn create_fallback_texture(queue: Arc<Queue>) -> Result<Arc<Texture>, ImageCreat
     Ok(tex)
 }
 
-fn load_texture(queue: Arc<Queue>, img: RgbaImage, mipmap: bool) -> Result<Arc<Texture>, ImageCreationError>
+fn load_texture(queue: Arc<Queue>, img: RgbaImage, mipmap: bool) -> Result<Box<dyn Texture>, ImageCreationError>
 {
     let (tex, future) = if mipmap
     {
@@ -303,27 +378,40 @@ fn load_texture(queue: Arc<Queue>, img: RgbaImage, mipmap: bool) -> Result<Arc<T
         vkutil::load_texture_nomipmap(queue.clone(), img)?
     };
     future.flush().unwrap();
-    Ok(tex)
+    Ok(Box::new(tex) as Box<_>)
 }
 
-fn load_texture_file(queue: Arc<Queue>, tex_name: &str) -> Result<Arc<Texture>, ImageCreationError>
+fn load_animated_texture(queue: Arc<Queue>, img: RgbaImage, animation_speed: f32, tex_coord_mod: Vec<(Vector2<f32>, Vector2<f32>)>) -> Result<Box<dyn Texture>, ImageCreationError>
+{
+    let (tex, future) = vkutil::load_texture_nomipmap(queue.clone(), img)?;
+    future.flush().unwrap();
+
+    Ok(Box::new(AnimatedTexture
+    { 
+        image: tex,
+        animation_speed: animation_speed,
+        tex_coord_mod: tex_coord_mod,
+    }) as Box<_>)
+}
+
+fn load_texture_file(queue: Arc<Queue>, tex_name: &str) -> Result<Box<dyn Texture>, ImageCreationError>
 {
     match q3shader::load_image_file(tex_name)
     {
         Ok(img) => load_texture(queue.clone(), img, false),
-        Err(_) => create_fallback_texture(queue.clone()),
+        Err(_) => Ok(Box::new(create_fallback_texture(queue.clone())?) as Box<_>),
     }
 }
 
-fn load_lightmap_texture(queue: Arc<Queue>, lightmap: &bsp::Lightmap) -> Result<Arc<Texture>, ImageCreationError>
+fn load_lightmap_texture(queue: Arc<Queue>, lightmap: &bsp::Lightmap) -> Result<Box<dyn Texture>, ImageCreationError>
 {
     let img = ImageBuffer::from_fn(bsp::LIGHTMAP_WIDTH as u32, bsp::LIGHTMAP_HEIGHT as u32, |x,y| { Rgb(color_shift_lighting(lightmap.image[y as usize][x as usize])).to_rgba() });
     let (tex, future) = vkutil::load_texture_nomipmap(queue.clone(), img)?;
     future.flush().unwrap();    // TODO We could probably collect futures and join them all at once instead of going through this sequentially
-    Ok(tex)
+    Ok(Box::new(tex) as Box<_>)
 }
 
-fn create_lightgrid_textures(queue: Arc<Queue>, dimensions: cgmath::Vector3::<usize>, light_volumes: &Vec<bsp::LightVolume>) -> Result<(Arc<Texture>, Arc<Texture>), ImageCreationError>
+fn create_lightgrid_textures(queue: Arc<Queue>, dimensions: Vector3::<usize>, light_volumes: &Vec<bsp::LightVolume>) -> Result<(Arc<TextureImage>, Arc<TextureImage>), ImageCreationError>
 {
     let (w, h, d) = dimensions.into();
     let grid_size = w * h * d;
@@ -384,7 +472,7 @@ fn color_shift_lighting(bytes: [u8; 3]) -> [u8; 3]
 fn create_surface_renderer(
     world: &bsp::World, surface: &bsp::Surface, shader_defs: &HashMap<String, q3shader::Shader>,
     queue: Arc<Queue>, samplers: &Samplers,
-    textures: &TextureArray, lightmaps: &TextureArray, lightgrid_textures: &(Arc<Texture>, Arc<Texture>), fallback_tex: Arc<Texture>,
+    textures: &TextureArray, lightmaps: &TextureArray, lightgrid_textures: &(Arc<TextureImage>, Arc<TextureImage>), fallback_tex: Arc<TextureImage>,
     pipelines: &mut Pipelines, vertex_slice: Arc<VertexSlice>, index_slice: Arc<IndexSlice>) -> Result<Box<dyn SurfaceRenderer>, PersistentDescriptorSetBuildError>
 {
     let surface_flags = world.shaders.get(surface.shader_id as usize).and_then(|t| Some(t.surface_flags)).unwrap_or(bsp::SurfaceFlags::empty());
@@ -399,7 +487,7 @@ fn create_surface_renderer(
     let alpha_mask = shader_def.map(|s| s.alpha_mask()).unwrap_or_default();
     let tex_coord_mod = if (cull_mode == q3shader::CullMode::None && alpha_mask == q3shader::AlphaMask::None) || 
         content_flags.intersects(bsp::ContentFlags::LAVA | bsp::ContentFlags::SLIME | bsp::ContentFlags::WATER | bsp::ContentFlags::TELEPORTER | bsp::ContentFlags::TRANSLUCENT) {
-        shader_def.as_ref().map(|s| s.tex_coord_mod()).unwrap_or_default()
+        shader_def.as_ref().map(|s| s.tex_coord_mod()).unwrap_or_default()  // TODO: decide whether to use this or the animated texture data based on whether it's animated
     } else {
         Default::default()
     };
@@ -422,7 +510,7 @@ fn create_surface_renderer(
         {
             let layout = pipeline.descriptor_set_layout(1).unwrap();
             let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
-                .add_sampled_image(textures.get(surface.shader_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
+                .add_sampled_image(textures.get(surface.shader_id as usize).map(|t| t.get_image()).unwrap_or(fallback_tex.clone()), sampler.clone()).unwrap()
                 .build()?);
 
             Ok(Box::new(SkySurfaceRenderer
@@ -437,8 +525,8 @@ fn create_surface_renderer(
         {
             let layout = pipeline.descriptor_set_layout(1).unwrap();
             let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
-                .add_sampled_image(textures.get(surface.shader_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
-                .add_sampled_image(lightmaps.get(surface.lightmap_id as usize).unwrap_or(&fallback_tex).clone(), samplers.clamp.clone()).unwrap()
+                .add_sampled_image(textures.get(surface.shader_id as usize).map(|t| t.get_image()).unwrap_or(fallback_tex.clone()), sampler.clone()).unwrap()
+                .add_sampled_image(lightmaps.get(surface.lightmap_id as usize).map(|t| t.get_image()).unwrap_or(fallback_tex.clone()), samplers.clamp.clone()).unwrap()
                 .build()?);
 
             Ok(Box::new(PlanarSurfaceRenderer
@@ -448,7 +536,7 @@ fn create_surface_renderer(
                 index_slice: index_slice.clone(),
                 descriptor_set: descriptor_set.clone(),
                 is_transparent: is_transparent,
-                tex_coord_mod: tex_coord_mod,
+                tex_coord_mod: tex_coord_mod,   // TODO: this is where we would keep a copy of either the tcMod data from the q3shader or the animated texture data
             }))
         },
         bsp::SurfaceType::Patch =>
@@ -458,7 +546,7 @@ fn create_surface_renderer(
             let index_buffer =
             {
                 let mut patch_indices = Vec::new();
-                let patch_count = cgmath::Vector2::new((surface.patch_size[0] - 1) / 2, (surface.patch_size[1] - 1) / 2);
+                let patch_count = Vector2::new((surface.patch_size[0] - 1) / 2, (surface.patch_size[1] - 1) / 2);
                 for y in 0..patch_count.y
                 {
                     for x in 0..patch_count.x
@@ -481,8 +569,8 @@ fn create_surface_renderer(
 
             let layout = pipeline.descriptor_set_layout(1).unwrap();
             let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
-                .add_sampled_image(textures.get(surface.shader_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
-                .add_sampled_image(lightmaps.get(surface.lightmap_id as usize).unwrap_or(&fallback_tex).clone(), samplers.clamp.clone()).unwrap()
+                .add_sampled_image(textures.get(surface.shader_id as usize).map(|t| t.get_image()).unwrap_or(fallback_tex.clone()), sampler.clone()).unwrap()
+                .add_sampled_image(lightmaps.get(surface.lightmap_id as usize).map(|t| t.get_image()).unwrap_or(fallback_tex.clone()), samplers.clamp.clone()).unwrap()
                 .build()?);
 
             Ok(Box::new(PatchSurfaceRenderer
@@ -499,7 +587,7 @@ fn create_surface_renderer(
         {
             let layout = pipeline.descriptor_set_layout(1).unwrap();
             let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
-                .add_sampled_image(textures.get(surface.shader_id as usize).unwrap_or(&fallback_tex).clone(), sampler.clone()).unwrap()
+                .add_sampled_image(textures.get(surface.shader_id as usize).map(|t| t.get_image()).unwrap_or(fallback_tex.clone()), sampler.clone()).unwrap()
                 .add_sampled_image(lightgrid_textures.0.clone(), samplers.clamp.clone()).unwrap()
                 .add_sampled_image(lightgrid_textures.1.clone(), samplers.clamp.clone()).unwrap()
                 .build()?);
@@ -706,7 +794,7 @@ impl vkcore::RendererAbstract for BspRenderer
         {
             let uniform_data = vs::ty::Data
             {
-                model: cgmath::Matrix4::from_scale(1.0).into(), // Just an identity matrix; the world doesn't move
+                model: Matrix4::from_scale(1.0).into(), // Just an identity matrix; the world doesn't move
                 view: camera.view_matrix().into(),
                 proj: camera.projection_matrix().into(),
                 lightgrid: self.lightgrid_transform.into(),
@@ -897,17 +985,17 @@ impl SurfaceRenderer for SkySurfaceRenderer
     fn draw_surface(&self, builder: &mut AutoCommandBufferBuilder, camera: &vkcore::Camera, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
     {
         let sets = (uniforms.clone(), self.descriptor_set.clone());
-        let pc = create_vertex_mods(camera.time, cgmath::Deg(0.0), [0.05, 0.1].into(), [3.0, 2.0].into());
+        let pc = create_vertex_mods(camera.time, Deg(0.0), [0.05, 0.1].into(), [3.0, 2.0].into());
         builder.draw_indexed(self.pipeline.clone(), &dynamic_state, vec!(self.vertex_slice.clone()), self.index_slice.clone(), sets, pc).unwrap();
     }
 }
 
-fn create_vertex_mods(time: f32, tc_rotate: cgmath::Deg<f32>, tc_scroll: cgmath::Vector2<f32>, tc_scale: cgmath::Vector2<f32>) -> vs::ty::VertexMods
+fn create_vertex_mods(time: f32, tc_rotate: Deg<f32>, tc_scroll: Vector2<f32>, tc_scale: Vector2<f32>) -> vs::ty::VertexMods
 {
     // TODO: we can probably replace all of tcMod with a single 3x3 matrix (see tcMod <transform>)
     vs::ty::VertexMods
     {
-        tc_rotate: cgmath::Rad::from(tc_rotate).0 * time,
+        tc_rotate: Rad::from(tc_rotate).0 * time,
         tc_scroll: (tc_scroll * time).into(),
         tc_scale: tc_scale.into(),
         _dummy0: Default::default(),
