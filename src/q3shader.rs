@@ -81,8 +81,7 @@ impl Shader
             x = x + frame.dimensions().0;
         }
 
-        let speed = frequency / num_frames as f32;
-        Ok((atlas, speed, coords))
+        Ok((atlas, frequency, coords))
     }
 
     pub fn blend_mode(&self) -> BlendMode

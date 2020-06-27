@@ -134,6 +134,7 @@ type TextureArray = Vec<Box<dyn Texture>>;
 trait Texture
 {
     fn get_image(&self) -> Arc<TextureImage>;
+    fn get_texcoord_modifier(&self) -> Option<Box<dyn TexCoordModifier>>;   // Not a fan of this design-wise but I kinda worked myself into a dead end here :/
 }
 
 trait TexCoordModifier
@@ -169,18 +170,22 @@ impl AnimatedTexture
 impl Texture for AnimatedTexture
 {
     fn get_image(&self) -> Arc<TextureImage> { self.image.clone() }
+
+    fn get_texcoord_modifier(&self) -> Option<Box<dyn TexCoordModifier>> { Some(Box::new(self.clone()) as Box<_>) }
 }
 
 impl Texture for Arc<TextureImage>
 {
     fn get_image(&self) -> Arc<TextureImage> { self.clone() }
+
+    fn get_texcoord_modifier(&self) -> Option<Box<dyn TexCoordModifier>> { None }
 }
 
 impl TexCoordModifier for AnimatedTexture
 {
     fn get_texcoord_transform(&self, time: f32) -> (Vector3<f32>, Vector3<f32>)
     {
-        let (offset, scale) = self.get_frame(time);
+        let (scale, offset) = self.get_frame(time);
         (Vector3::new(scale.x, 0.0, offset.x), Vector3::new(0.0, scale.y, offset.y))
     }
 }
@@ -488,17 +493,29 @@ fn create_surface_renderer(
     let shader_def = world.shaders.get(surface.shader_id as usize).and_then(|s| shader_defs.get(s.name()));
     let is_transparent = shader_def.as_ref().map(|s| !s.blend_mode().is_opaque()).unwrap_or_default();
     let wrap_mode = shader_def.as_ref().map(|s| s.wrap_mode()).unwrap_or_default();
-
-    // Apply texture coordinate animations only on surfaces with specific properties (in particular: liquid surfaces and transparent effects).
-    // Some solid surfaces have animated background layers and those will look all wrong with the current setup, so we have to cleverly filter them out.
     let cull_mode = shader_def.map(|s| s.cull).unwrap_or_default();
     let alpha_mask = shader_def.map(|s| s.alpha_mask()).unwrap_or_default();
-    let tex_coord_mod = Box::new(if (cull_mode == q3shader::CullMode::None && alpha_mask == q3shader::AlphaMask::None) || 
-        content_flags.intersects(bsp::ContentFlags::LAVA | bsp::ContentFlags::SLIME | bsp::ContentFlags::WATER | bsp::ContentFlags::TELEPORTER | bsp::ContentFlags::TRANSLUCENT) {
-        shader_def.as_ref().map(|s| s.tex_coord_mod()).unwrap_or_default()  // TODO: decide whether to use this or the animated texture data based on whether it's animated
-    } else {
-        Default::default()
-    });
+
+    let main_texture = textures.get(surface.shader_id as usize);
+    let main_tex_image = main_texture.map(|t| t.get_image()).unwrap_or(fallback_tex.clone());
+    let lightmap_image = lightmaps.get(surface.lightmap_id as usize).map(|t| t.get_image()).unwrap_or(fallback_tex.clone());
+
+    let tex_coord_mod = match main_texture.map(|t| t.get_texcoord_modifier()).unwrap_or(main_tex_image.get_texcoord_modifier()) // This is messy
+    {
+        Some(tcmod) => tcmod,
+        None => Box::new(
+            // Apply texture coordinate animations only on surfaces with specific properties (in particular: liquid surfaces and transparent effects).
+            // Some solid surfaces have animated background layers and those will look all wrong with the current setup, so we have to cleverly filter them out.
+            if (cull_mode == q3shader::CullMode::None && alpha_mask == q3shader::AlphaMask::None) || 
+                content_flags.intersects(bsp::ContentFlags::LAVA | bsp::ContentFlags::SLIME | bsp::ContentFlags::WATER | bsp::ContentFlags::TELEPORTER | bsp::ContentFlags::TRANSLUCENT) 
+            {
+                shader_def.as_ref().map(|s| s.tex_coord_mod()).unwrap_or_default()
+            } 
+            else 
+            {
+                Default::default()
+            }),
+    };
     
     let pipeline = match pipelines.get(surface, surface_flags, shader_def)
     {
@@ -518,7 +535,7 @@ fn create_surface_renderer(
         {
             let layout = pipeline.descriptor_set_layout(1).unwrap();
             let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
-                .add_sampled_image(textures.get(surface.shader_id as usize).map(|t| t.get_image()).unwrap_or(fallback_tex.clone()), sampler.clone()).unwrap()
+                .add_sampled_image(main_tex_image, sampler.clone()).unwrap()
                 .build()?);
 
             Ok(Box::new(SkySurfaceRenderer
@@ -533,8 +550,8 @@ fn create_surface_renderer(
         {
             let layout = pipeline.descriptor_set_layout(1).unwrap();
             let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
-                .add_sampled_image(textures.get(surface.shader_id as usize).map(|t| t.get_image()).unwrap_or(fallback_tex.clone()), sampler.clone()).unwrap()
-                .add_sampled_image(lightmaps.get(surface.lightmap_id as usize).map(|t| t.get_image()).unwrap_or(fallback_tex.clone()), samplers.clamp.clone()).unwrap()
+                .add_sampled_image(main_tex_image, sampler.clone()).unwrap()
+                .add_sampled_image(lightmap_image, samplers.clamp.clone()).unwrap()
                 .build()?);
 
             Ok(Box::new(PlanarSurfaceRenderer
@@ -544,7 +561,7 @@ fn create_surface_renderer(
                 index_slice: index_slice.clone(),
                 descriptor_set: descriptor_set.clone(),
                 is_transparent: is_transparent,
-                tex_coord_mod: tex_coord_mod,   // TODO: this is where we would keep a copy of either the tcMod data from the q3shader or the animated texture data
+                tex_coord_mod: tex_coord_mod,
             }))
         },
         bsp::SurfaceType::Patch =>
@@ -577,8 +594,8 @@ fn create_surface_renderer(
 
             let layout = pipeline.descriptor_set_layout(1).unwrap();
             let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
-                .add_sampled_image(textures.get(surface.shader_id as usize).map(|t| t.get_image()).unwrap_or(fallback_tex.clone()), sampler.clone()).unwrap()
-                .add_sampled_image(lightmaps.get(surface.lightmap_id as usize).map(|t| t.get_image()).unwrap_or(fallback_tex.clone()), samplers.clamp.clone()).unwrap()
+                .add_sampled_image(main_tex_image, sampler.clone()).unwrap()
+                .add_sampled_image(lightmap_image, samplers.clamp.clone()).unwrap()
                 .build()?);
 
             Ok(Box::new(PatchSurfaceRenderer
@@ -595,7 +612,7 @@ fn create_surface_renderer(
         {
             let layout = pipeline.descriptor_set_layout(1).unwrap();
             let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
-                .add_sampled_image(textures.get(surface.shader_id as usize).map(|t| t.get_image()).unwrap_or(fallback_tex.clone()), sampler.clone()).unwrap()
+                .add_sampled_image(main_tex_image, sampler.clone()).unwrap()
                 .add_sampled_image(lightgrid_textures.0.clone(), samplers.clamp.clone()).unwrap()
                 .add_sampled_image(lightgrid_textures.1.clone(), samplers.clamp.clone()).unwrap()
                 .build()?);
