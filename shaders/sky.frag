@@ -12,9 +12,8 @@ layout(set = 1, binding = 0) uniform sampler2D mainTex;
 
 layout(push_constant) uniform VertexMods
 {
-    float tc_rotate;
-    vec2 tc_scroll;
-    vec2 tc_scale;
+    vec3 tcmod_u;
+    vec3 tcmod_v;
 } pc;
 
 vec2 vec_to_latlng(vec3 v)
@@ -30,8 +29,8 @@ void main() {
     vec2 uv = vec_to_latlng(v_view_ray);
     
     // Modify sky texture coords to create a scrolling effect
-    uv += pc.tc_scroll;
-    uv *= pc.tc_scale;
+    vec3 uv_dir = vec3(uv - 0.5, 1);
+    uv = vec2(dot(uv_dir, pc.tcmod_u), dot(uv_dir, pc.tcmod_v)) + 0.5;
 
     f_color = texture(mainTex, -uv);
 }

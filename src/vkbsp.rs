@@ -961,7 +961,8 @@ impl SurfaceRenderer for PlanarSurfaceRenderer
         // TODO This could possibly be done more efficiently using indirect drawing instead of using buffer slices, but I'm getting stuck with Vulkano's arcane type requirements
         // TODO Look if SyncCommandBufferBuilder can be a valid alternative (split up state binding and draw calls)
         let sets = (uniforms.clone(), self.descriptor_set.clone());
-        let pc = create_vertex_mods(camera.time, self.tex_coord_mod.rotate, self.tex_coord_mod.scroll, self.tex_coord_mod.scale);
+        let (tu, tv) = self.tex_coord_mod.get_texcoord_transform(camera.time);
+        let pc = create_vertex_mods(tu, tv);
         builder.draw_indexed(self.pipeline.clone(), &dynamic_state, vec!(self.vertex_slice.clone()), self.index_slice.clone(), sets, pc).unwrap();
     }
 }
@@ -973,7 +974,8 @@ impl SurfaceRenderer for PatchSurfaceRenderer
     fn draw_surface(&self, builder: &mut AutoCommandBufferBuilder, camera: &vkcore::Camera, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
     {
         let sets = (uniforms.clone(), self.descriptor_set.clone());
-        let pc = create_vertex_mods(camera.time, self.tex_coord_mod.rotate, self.tex_coord_mod.scroll, self.tex_coord_mod.scale);
+        let (tu, tv) = self.tex_coord_mod.get_texcoord_transform(camera.time);
+        let pc = create_vertex_mods(tu, tv);
         builder.draw_indexed(self.pipeline.clone(), &dynamic_state, vec!(self.vertex_slice.clone()), self.index_buffer.clone(), sets, pc).unwrap();
     }
 }
@@ -985,19 +987,17 @@ impl SurfaceRenderer for SkySurfaceRenderer
     fn draw_surface(&self, builder: &mut AutoCommandBufferBuilder, camera: &vkcore::Camera, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
     {
         let sets = (uniforms.clone(), self.descriptor_set.clone());
-        let pc = create_vertex_mods(camera.time, Deg(0.0), [0.05, 0.1].into(), [3.0, 2.0].into());
+        let pc = create_vertex_mods(Vector3::new(3.0, 0.0, 0.15 * camera.time), Vector3::new(0.0, 2.0, 0.2 * camera.time));
         builder.draw_indexed(self.pipeline.clone(), &dynamic_state, vec!(self.vertex_slice.clone()), self.index_slice.clone(), sets, pc).unwrap();
     }
 }
 
-fn create_vertex_mods(time: f32, tc_rotate: Deg<f32>, tc_scroll: Vector2<f32>, tc_scale: Vector2<f32>) -> vs::ty::VertexMods
+fn create_vertex_mods(tcmod_u: Vector3<f32>, tcmod_v: Vector3<f32>) -> vs::ty::VertexMods
 {
-    // TODO: we can probably replace all of tcMod with a single 3x3 matrix (see tcMod <transform>)
     vs::ty::VertexMods
     {
-        tc_rotate: Rad::from(tc_rotate).0 * time,
-        tc_scroll: (tc_scroll * time).into(),
-        tc_scale: tc_scale.into(),
+        tcmod_u: tcmod_u.into(),
+        tcmod_v: tcmod_v.into(),
         _dummy0: Default::default(),
     }
 }

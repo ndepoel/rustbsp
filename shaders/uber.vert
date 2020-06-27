@@ -20,9 +20,8 @@ layout(set = 0, binding = 0) uniform Data {
 
 layout(push_constant) uniform VertexMods
 {
-    float tc_rotate;
-    vec2 tc_scroll;
-    vec2 tc_scale;
+    vec3 tcmod_u;
+    vec3 tcmod_v;
 } pc;
 
 void main() {
@@ -32,15 +31,9 @@ void main() {
 
     v_normal = transpose(inverse(mat3(uniforms.model))) * normal;
 
-    // Create a transformation that contains all of the texture coordinate modifiers (TODO this can be done on the CPU for all vertices)
-    float sin_rot = sin(pc.tc_rotate);
-    float cos_rot = cos(pc.tc_rotate);
-    vec3 tu = pc.tc_scale.x * vec3(cos_rot, -sin_rot, pc.tc_scroll.x);
-    vec3 tv = pc.tc_scale.y * vec3(sin_rot, cos_rot, pc.tc_scroll.y);
-
     // For rotation to work correctly, we need to move the texture coordinates around a pivot in the center of the texture (i.e. 0.5, 0.5)
     vec3 uv_dir = vec3(texture_coord - 0.5, 1);
-    v_tex_uv = vec2(dot(uv_dir, tu), dot(uv_dir, tv)) + 0.5;
+    v_tex_uv = vec2(dot(uv_dir, pc.tcmod_u), dot(uv_dir, pc.tcmod_v)) + 0.5;
 
     v_lightmap_uv = lightmap_coord;
     v_lightgrid_uv = (uniforms.lightgrid * worldpos).xyz;
