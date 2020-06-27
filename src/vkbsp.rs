@@ -236,6 +236,14 @@ struct SkySurfaceRenderer
     descriptor_set: Arc<dyn DescriptorSet + Sync + Send>,
 }
 
+impl TexCoordModifier for SkySurfaceRenderer
+{
+    fn get_texcoord_transform(&self, time: f32) -> (Vector3<f32>, Vector3<f32>)
+    {
+        (Vector3::new(3.0, 0.0, 0.15 * time), Vector3::new(0.0, 2.0, 0.2 * time))
+    }
+}
+
 type MeshSurfaceRenderer = PlanarSurfaceRenderer;   // At the moment these two work identically, but conceptually I'd like to keep them distinct
 
 // We actually might want to pull the renderpass and framebuffer creation into here as well, to allow more flexibility in what and how we render. That's something for later though.
@@ -961,8 +969,7 @@ impl SurfaceRenderer for PlanarSurfaceRenderer
         // TODO This could possibly be done more efficiently using indirect drawing instead of using buffer slices, but I'm getting stuck with Vulkano's arcane type requirements
         // TODO Look if SyncCommandBufferBuilder can be a valid alternative (split up state binding and draw calls)
         let sets = (uniforms.clone(), self.descriptor_set.clone());
-        let (tu, tv) = self.tex_coord_mod.get_texcoord_transform(camera.time);
-        let pc = create_vertex_mods(tu, tv);
+        let pc = create_vertex_mods(&self.tex_coord_mod, camera.time);
         builder.draw_indexed(self.pipeline.clone(), &dynamic_state, vec!(self.vertex_slice.clone()), self.index_slice.clone(), sets, pc).unwrap();
     }
 }
@@ -974,8 +981,7 @@ impl SurfaceRenderer for PatchSurfaceRenderer
     fn draw_surface(&self, builder: &mut AutoCommandBufferBuilder, camera: &vkcore::Camera, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
     {
         let sets = (uniforms.clone(), self.descriptor_set.clone());
-        let (tu, tv) = self.tex_coord_mod.get_texcoord_transform(camera.time);
-        let pc = create_vertex_mods(tu, tv);
+        let pc = create_vertex_mods(&self.tex_coord_mod, camera.time);
         builder.draw_indexed(self.pipeline.clone(), &dynamic_state, vec!(self.vertex_slice.clone()), self.index_buffer.clone(), sets, pc).unwrap();
     }
 }
@@ -987,17 +993,18 @@ impl SurfaceRenderer for SkySurfaceRenderer
     fn draw_surface(&self, builder: &mut AutoCommandBufferBuilder, camera: &vkcore::Camera, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
     {
         let sets = (uniforms.clone(), self.descriptor_set.clone());
-        let pc = create_vertex_mods(Vector3::new(3.0, 0.0, 0.15 * camera.time), Vector3::new(0.0, 2.0, 0.2 * camera.time));
+        let pc = create_vertex_mods(self, camera.time);
         builder.draw_indexed(self.pipeline.clone(), &dynamic_state, vec!(self.vertex_slice.clone()), self.index_slice.clone(), sets, pc).unwrap();
     }
 }
 
-fn create_vertex_mods(tcmod_u: Vector3<f32>, tcmod_v: Vector3<f32>) -> vs::ty::VertexMods
+fn create_vertex_mods(tex_coord_mod: &impl TexCoordModifier, time: f32) -> vs::ty::VertexMods
 {
+    let (tu, tv) = tex_coord_mod.get_texcoord_transform(time);
     vs::ty::VertexMods
     {
-        tcmod_u: tcmod_u.into(),
-        tcmod_v: tcmod_v.into(),
+        tcmod_u: tu.into(),
+        tcmod_v: tv.into(),
         _dummy0: Default::default(),
     }
 }
