@@ -215,7 +215,7 @@ struct PlanarSurfaceRenderer
     index_slice: Arc<IndexSlice>,
     descriptor_set: Arc<dyn DescriptorSet + Sync + Send>,
     is_transparent: bool,
-    tex_coord_mod: q3shader::TexCoordModifier,
+    tex_coord_mod: Box<dyn TexCoordModifier>,
 }
 
 struct PatchSurfaceRenderer
@@ -225,7 +225,7 @@ struct PatchSurfaceRenderer
     index_buffer: Arc<ImmutableBuffer<[u32]>>,  // This renderer has its own index buffer, to break apart the surface into separate patches of 9 vertices each
     descriptor_set: Arc<dyn DescriptorSet + Sync + Send>,
     is_transparent: bool,
-    tex_coord_mod: q3shader::TexCoordModifier,
+    tex_coord_mod: Box<dyn TexCoordModifier>,
 }
 
 struct SkySurfaceRenderer
@@ -493,12 +493,12 @@ fn create_surface_renderer(
     // Some solid surfaces have animated background layers and those will look all wrong with the current setup, so we have to cleverly filter them out.
     let cull_mode = shader_def.map(|s| s.cull).unwrap_or_default();
     let alpha_mask = shader_def.map(|s| s.alpha_mask()).unwrap_or_default();
-    let tex_coord_mod = if (cull_mode == q3shader::CullMode::None && alpha_mask == q3shader::AlphaMask::None) || 
+    let tex_coord_mod = Box::new(if (cull_mode == q3shader::CullMode::None && alpha_mask == q3shader::AlphaMask::None) || 
         content_flags.intersects(bsp::ContentFlags::LAVA | bsp::ContentFlags::SLIME | bsp::ContentFlags::WATER | bsp::ContentFlags::TELEPORTER | bsp::ContentFlags::TRANSLUCENT) {
         shader_def.as_ref().map(|s| s.tex_coord_mod()).unwrap_or_default()  // TODO: decide whether to use this or the animated texture data based on whether it's animated
     } else {
         Default::default()
-    };
+    });
     
     let pipeline = match pipelines.get(surface, surface_flags, shader_def)
     {
@@ -969,7 +969,7 @@ impl SurfaceRenderer for PlanarSurfaceRenderer
         // TODO This could possibly be done more efficiently using indirect drawing instead of using buffer slices, but I'm getting stuck with Vulkano's arcane type requirements
         // TODO Look if SyncCommandBufferBuilder can be a valid alternative (split up state binding and draw calls)
         let sets = (uniforms.clone(), self.descriptor_set.clone());
-        let pc = create_vertex_mods(&self.tex_coord_mod, camera.time);
+        let pc = create_vertex_mods(self.tex_coord_mod.as_ref(), camera.time);
         builder.draw_indexed(self.pipeline.clone(), &dynamic_state, vec!(self.vertex_slice.clone()), self.index_slice.clone(), sets, pc).unwrap();
     }
 }
@@ -981,7 +981,7 @@ impl SurfaceRenderer for PatchSurfaceRenderer
     fn draw_surface(&self, builder: &mut AutoCommandBufferBuilder, camera: &vkcore::Camera, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
     {
         let sets = (uniforms.clone(), self.descriptor_set.clone());
-        let pc = create_vertex_mods(&self.tex_coord_mod, camera.time);
+        let pc = create_vertex_mods(self.tex_coord_mod.as_ref(), camera.time);
         builder.draw_indexed(self.pipeline.clone(), &dynamic_state, vec!(self.vertex_slice.clone()), self.index_buffer.clone(), sets, pc).unwrap();
     }
 }
@@ -998,7 +998,7 @@ impl SurfaceRenderer for SkySurfaceRenderer
     }
 }
 
-fn create_vertex_mods(tex_coord_mod: &impl TexCoordModifier, time: f32) -> vs::ty::VertexMods
+fn create_vertex_mods(tex_coord_mod: &dyn TexCoordModifier, time: f32) -> vs::ty::VertexMods
 {
     let (tu, tv) = tex_coord_mod.get_texcoord_transform(time);
     vs::ty::VertexMods
