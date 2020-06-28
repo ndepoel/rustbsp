@@ -986,7 +986,8 @@ impl SurfaceRenderer for PlanarSurfaceRenderer
         // TODO This could possibly be done more efficiently using indirect drawing instead of using buffer slices, but I'm getting stuck with Vulkano's arcane type requirements
         // TODO Look if SyncCommandBufferBuilder can be a valid alternative (split up state binding and draw calls)
         let sets = (uniforms.clone(), self.descriptor_set.clone());
-        let pc = create_vertex_mods(self.tex_coord_mod.as_ref(), camera.time);
+        let time_offset = ((self as *const _) as usize & 0xFFFF) as f32 / 7919.0; // Create a pseudo-random number using the raw struct pointer, to move similar animations out of phase and add some visual variety
+        let pc = create_vertex_mods(self.tex_coord_mod.as_ref(), camera.time + time_offset);
         builder.draw_indexed(self.pipeline.clone(), &dynamic_state, vec!(self.vertex_slice.clone()), self.index_slice.clone(), sets, pc).unwrap();
     }
 }
