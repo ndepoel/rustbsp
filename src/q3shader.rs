@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::cmp::{ min, max };
 use std::iter::{ repeat, Iterator, FromIterator };
 
-use cgmath::{ Deg, Vector2, Vector3 };
+use cgmath::{ Deg, Vector2, Vector3, Vector4 };
 use image::{ ImageBuffer, Rgba, Pixel, ImageResult, DynamicImage, RgbaImage, ImageError };
 use image::imageops;
 
@@ -16,6 +16,7 @@ pub struct Shader
     pub name: String,
     pub textures: Vec<TextureMap>,
     pub cull: CullMode,
+    pub vertex_deform: VertexDeformation,
 }
 
 impl Shader
@@ -468,6 +469,33 @@ impl Default for TexCoordGen
     fn default() -> Self { Self::Base }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct VertexDeformation
+{
+    pub wave: Vector4<f32>, // div, base, amplitude, frequency
+}
+
+impl Default for VertexDeformation
+{
+    fn default() -> Self
+    {
+        VertexDeformation
+        {
+            wave: Vector4::new(1.0, 0.0, 0.0, 0.0),
+        }
+    }
+}
+
+impl VertexDeformation
+{
+    pub fn is_enabled(&self) -> bool
+    {
+        self.wave[1] != 0.0 ||
+        self.wave[2] != 0.0 ||
+        self.wave[3] != 0.0
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RgbGen
 {
@@ -569,6 +597,26 @@ fn parse_tc_mod(chars: &mut Chars<'_>, tc_mod: &mut TexCoordModifier)
     }
 }
 
+fn parse_deform_vertexes(chars: &mut Chars<'_>, vertex_deform: &mut VertexDeformation)
+{
+    let tokens = parser::tokenize_line(chars);
+    let mut iter = tokens.iter();
+    match iter.next()
+    {
+        Some(token) if token.to_lowercase() == "wave" => vertex_deform.wave = 
+        {
+            let div = next(&mut iter, 1.0);
+            let _func = iter.next(); // Ignored, we use sine waves for everything
+            let base = next(&mut iter, 0.0);
+            let amplitude = next(&mut iter, 0.0);
+            let _phase = next(&mut iter, 0.0);   // Ignored, not that interesting for the end result
+            let frequency = next(&mut iter, 0.0);
+            Vector4::new(div, base, amplitude, frequency)
+        },
+        _ => { },
+    }
+}
+
 fn parse_rgb_gen(chars: &mut Chars<'_>) -> RgbGen
 {
     match parser::next_token(chars)
@@ -651,6 +699,7 @@ fn parse_shader(chars: &mut Chars<'_>) -> Option<Shader>
             Some(token) if token == "}" => break,
             Some(token) if token == "{" => { parse_texture_map(chars).and_then(|t| Some(shader.textures.push(t))); },
             Some(token) if token.to_lowercase() == "cull" => shader.cull = parse_cull_mode(chars),
+            Some(token) if token.to_lowercase() == "deformvertexes" => parse_deform_vertexes(chars, &mut shader.vertex_deform),
             Some(_) => continue,
             None => break,
         }

@@ -12,6 +12,8 @@ layout(set = 1, binding = 0) uniform sampler2D mainTex;
 
 layout(push_constant) uniform VertexMods
 {
+    float time;
+    vec4 vertex_wave;
     vec3 tcmod_u;
     vec3 tcmod_v;
 } pc;

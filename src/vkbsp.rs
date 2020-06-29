@@ -24,7 +24,7 @@ use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::Hasher;
 
-use cgmath::{ Vector2, Vector3, Matrix4, Deg, Rad };
+use cgmath::{ Vector2, Vector3, Vector4, Matrix4, Deg, Rad };
 use cgmath::prelude::*;
 
 use super::vkcore;
@@ -183,6 +183,7 @@ impl Texture for Arc<TextureImage>
 
 impl TexCoordModifier for AnimatedTexture
 {
+    // Cycle through the individual frames embedded in a single atlas texture
     fn get_texcoord_transform(&self, time: f32) -> (Vector3<f32>, Vector3<f32>)
     {
         let (scale, offset) = self.get_frame(time);
@@ -192,6 +193,7 @@ impl TexCoordModifier for AnimatedTexture
 
 impl TexCoordModifier for q3shader::TexCoordModifier
 {
+    // Apply arbitrary rotation, scale and translation
     fn get_texcoord_transform(&self, time: f32) -> (Vector3<f32>, Vector3<f32>)
     {
         let rotate = Rad::from(self.rotate).0 * time;
@@ -221,6 +223,7 @@ struct PlanarSurfaceRenderer
     descriptor_set: Arc<dyn DescriptorSet + Sync + Send>,
     is_transparent: bool,
     tex_coord_mod: Box<dyn TexCoordModifier>,
+    vertex_wave: Vector4<f32>,  // TODO Really at this point we should just include a reference to the original Q3 shader ("material") but that's something for a big overhaul
 }
 
 struct PatchSurfaceRenderer
@@ -231,6 +234,7 @@ struct PatchSurfaceRenderer
     descriptor_set: Arc<dyn DescriptorSet + Sync + Send>,
     is_transparent: bool,
     tex_coord_mod: Box<dyn TexCoordModifier>,
+    vertex_wave: Vector4<f32>,
 }
 
 struct SkySurfaceRenderer
@@ -243,6 +247,7 @@ struct SkySurfaceRenderer
 
 impl TexCoordModifier for SkySurfaceRenderer
 {
+    // Constant non-uniform scaling and scrolling effect
     fn get_texcoord_transform(&self, time: f32) -> (Vector3<f32>, Vector3<f32>)
     {
         (Vector3::new(3.0, 0.0, 0.15 * time), Vector3::new(0.0, 2.0, 0.2 * time))
@@ -492,9 +497,10 @@ fn create_surface_renderer(
     let content_flags = world.shaders.get(surface.shader_id as usize).and_then(|t| Some(t.content_flags)).unwrap_or(bsp::ContentFlags::empty());
     let shader_def = world.shaders.get(surface.shader_id as usize).and_then(|s| shader_defs.get(s.name()));
     let is_transparent = shader_def.as_ref().map(|s| !s.blend_mode().is_opaque()).unwrap_or_default();
-    let wrap_mode = shader_def.as_ref().map(|s| s.wrap_mode()).unwrap_or_default();
+    let wrap_mode = shader_def.map(|s| s.wrap_mode()).unwrap_or_default();
     let cull_mode = shader_def.map(|s| s.cull).unwrap_or_default();
     let alpha_mask = shader_def.map(|s| s.alpha_mask()).unwrap_or_default();
+    let vertex_deform = shader_def.map(|s| s.vertex_deform).unwrap_or_default();
 
     let main_texture = textures.get(surface.shader_id as usize);
     let main_tex_image = main_texture.map(|t| t.get_image()).unwrap_or(fallback_tex.clone());
@@ -562,6 +568,7 @@ fn create_surface_renderer(
                 descriptor_set: descriptor_set.clone(),
                 is_transparent: is_transparent,
                 tex_coord_mod: tex_coord_mod,
+                vertex_wave: vertex_deform.wave,
             }))
         },
         bsp::SurfaceType::Patch =>
@@ -606,6 +613,7 @@ fn create_surface_renderer(
                 descriptor_set: descriptor_set.clone(),
                 is_transparent: is_transparent,
                 tex_coord_mod: tex_coord_mod,
+                vertex_wave: vertex_deform.wave,
             }))
         },
         bsp::SurfaceType::Mesh =>
@@ -625,6 +633,7 @@ fn create_surface_renderer(
                 descriptor_set: descriptor_set.clone(),
                 is_transparent: is_transparent,
                 tex_coord_mod: tex_coord_mod,
+                vertex_wave: vertex_deform.wave,
             }))
         },
         _ => Ok(Box::new(NoopSurfaceRenderer {}))
@@ -658,6 +667,7 @@ impl Pipelines
         let mask = shader_def.map(|s| s.alpha_mask()).unwrap_or_default();
         let blend = shader_def.map(|s| s.blend_mode()).unwrap_or_default();
         let baked_lighting = shader_def.map(|s| s.uses_baked_lighting()).unwrap_or(true);
+        let apply_vertex_deform = shader_def.map(|s| s.vertex_deform.is_enabled()).unwrap_or_default();
 
         let mut hasher = DefaultHasher::new();
         hasher.write_i32(surface.surface_type as i32);
@@ -667,6 +677,7 @@ impl Pipelines
         hasher.write_i32(blend.source as i32);
         hasher.write_i32(blend.destination as i32);
         hasher.write_u8(baked_lighting as u8);
+        hasher.write_u8(apply_vertex_deform as u8);
         let hash = hasher.finish();
 
         match self.pipelines.get(&hash)
@@ -674,7 +685,7 @@ impl Pipelines
             Some(pipeline) => Ok(pipeline.clone()),
             None =>
             {
-                let pipeline = self.create(surface.surface_type, surface_flags, cull, mask, blend, baked_lighting)?;
+                let pipeline = self.create(surface.surface_type, surface_flags, cull, mask, blend, baked_lighting, apply_vertex_deform)?;
                 self.pipelines.insert(hash, pipeline.clone());
                 Ok(pipeline)
             }
@@ -682,14 +693,16 @@ impl Pipelines
     }
 
     fn create(
-        &mut self, surface_type: bsp::SurfaceType, surface_flags: bsp::SurfaceFlags, 
-        cull: q3shader::CullMode, mask: q3shader::AlphaMask, blend: q3shader::BlendMode, baked_lighting: bool,
+        &mut self, surface_type: bsp::SurfaceType, surface_flags: bsp::SurfaceFlags,
+        cull: q3shader::CullMode, mask: q3shader::AlphaMask, blend: q3shader::BlendMode,
+        baked_lighting: bool, apply_vertex_deform: bool
     ) -> Result<Arc<dyn GraphicsPipelineAbstract + Send + Sync>, GraphicsPipelineCreationError>
     {
         // First, setup the basic pipeline with all the standard attributes
+        let sc = vs::SpecializationConstants { apply_deformation: apply_vertex_deform as u32 };
         let builder = GraphicsPipeline::start()
             .vertex_input_single_buffer::<bsp::Vertex>()
-            .vertex_shader(self.shaders.uber_vert.main_entry_point(), ())
+            .vertex_shader(self.shaders.uber_vert.main_entry_point(), sc)
             //.polygon_mode_line()
             .viewports_dynamic_scissors_irrelevant(1)
             .depth_stencil_simple_depth()
@@ -987,7 +1000,7 @@ impl SurfaceRenderer for PlanarSurfaceRenderer
         // TODO Look if SyncCommandBufferBuilder can be a valid alternative (split up state binding and draw calls)
         let sets = (uniforms.clone(), self.descriptor_set.clone());
         let time_offset = ((self as *const _) as usize & 0xFFFF) as f32 / 7919.0; // Create a pseudo-random number using the raw struct pointer, to move similar animations out of phase and add some visual variety
-        let pc = create_vertex_mods(self.tex_coord_mod.as_ref(), camera.time + time_offset);
+        let pc = create_vertex_mods(self.tex_coord_mod.as_ref(), self.vertex_wave, camera.time, time_offset);
         builder.draw_indexed(self.pipeline.clone(), &dynamic_state, vec!(self.vertex_slice.clone()), self.index_slice.clone(), sets, pc).unwrap();
     }
 }
@@ -999,7 +1012,7 @@ impl SurfaceRenderer for PatchSurfaceRenderer
     fn draw_surface(&self, builder: &mut AutoCommandBufferBuilder, camera: &vkcore::Camera, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
     {
         let sets = (uniforms.clone(), self.descriptor_set.clone());
-        let pc = create_vertex_mods(self.tex_coord_mod.as_ref(), camera.time);
+        let pc = create_vertex_mods(self.tex_coord_mod.as_ref(), self.vertex_wave, camera.time, 0.0);
         builder.draw_indexed(self.pipeline.clone(), &dynamic_state, vec!(self.vertex_slice.clone()), self.index_buffer.clone(), sets, pc).unwrap();
     }
 }
@@ -1011,18 +1024,21 @@ impl SurfaceRenderer for SkySurfaceRenderer
     fn draw_surface(&self, builder: &mut AutoCommandBufferBuilder, camera: &vkcore::Camera, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
     {
         let sets = (uniforms.clone(), self.descriptor_set.clone());
-        let pc = create_vertex_mods(self, camera.time);
+        let pc = create_vertex_mods(self, Vector4::new(1.0, 0.0, 0.0, 0.0), camera.time, 0.0);
         builder.draw_indexed(self.pipeline.clone(), &dynamic_state, vec!(self.vertex_slice.clone()), self.index_slice.clone(), sets, pc).unwrap();
     }
 }
 
-fn create_vertex_mods(tex_coord_mod: &dyn TexCoordModifier, time: f32) -> vs::ty::VertexMods
+fn create_vertex_mods(tex_coord_mod: &dyn TexCoordModifier, vertex_wave: Vector4<f32>, time: f32, time_offset: f32) -> vs::ty::VertexMods
 {
-    let (tu, tv) = tex_coord_mod.get_texcoord_transform(time);
+    let (tu, tv) = tex_coord_mod.get_texcoord_transform(time + time_offset);
     vs::ty::VertexMods
     {
+        time: time,
+        vertex_wave: vertex_wave.into(),
         tcmod_u: tu.into(),
         tcmod_v: tv.into(),
         _dummy0: Default::default(),
+        _dummy1: Default::default(),
     }
 }

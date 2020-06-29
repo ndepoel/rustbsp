@@ -20,12 +20,23 @@ layout(set = 0, binding = 0) uniform Data {
 
 layout(push_constant) uniform VertexMods
 {
+    float time;
+    vec4 vertex_wave;   // x = div, y = base, z = amplitude, w = frequency
     vec3 tcmod_u;
     vec3 tcmod_v;
 } pc;
 
+layout(constant_id = 0) const bool apply_deformation = false;
+
 void main() {
-    vec4 worldpos = uniforms.model * vec4(position, 1.0);
+    vec3 pos = position;
+    if (apply_deformation)
+    {
+        float phase = (pos.x + pos.y + pos.z) / pc.vertex_wave.x;
+        pos = pos + normal * (pc.vertex_wave.y + pc.vertex_wave.z * sin(2.0 * 3.14159265 * pc.vertex_wave.w * pc.time + phase));
+    }
+
+    vec4 worldpos = uniforms.model * vec4(pos, 1.0);
     vec4 viewpos = uniforms.view * worldpos;
     gl_Position = uniforms.proj * viewpos;
 
