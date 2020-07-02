@@ -522,6 +522,7 @@ fn parse_cull_mode(chars: &mut Chars<'_>) -> CullMode
         Some(token) if token.to_lowercase() == "back" => CullMode::Back,
         Some(token) if token.to_lowercase() == "none" => CullMode::None,
         Some(token) if token.to_lowercase() == "disable" => CullMode::None,
+        Some(token) if token.to_lowercase() == "twosided" => CullMode::None,
         _ => CullMode::default(),
     }
 }
