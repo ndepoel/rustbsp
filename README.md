@@ -3,6 +3,25 @@
 ## How To Use
 
 ## Compiling
+In the basis, compiling this project is just a matter of running:
+```
+cargo build
+```
+However as this project makes use of Vulkano which in turn makes use of `shaderc-rs`, there are some third-party tools that need to be installed first as also explained by [Vulkano's README](https://github.com/vulkano-rs/vulkano).
+
+Download and install the following tools:
+* [CMake](https://cmake.org/download/)
+* [Ninja](https://github.com/ninja-build/ninja/releases)
+* [Python](https://www.python.org/downloads/) (or install it through the Windows Store)
+
+As Ninja is a zipped executable download and it needs to be available on `PATH`, what I simply did was unzip the executable into CMake's `bin` directory.
+Vulkano's README recommends installing `msys2` and installing the above tools using `pacman` but you really don't need to do any of that.
+
+After installing the above, `cargo build` should download and compile all the dependencies and build the application as expected. During development I often ran:
+```
+cargo run --release maps\[somemap].bsp
+```
+to compile and test the application in one go. A release build will obviously take a bit longer to compile and does not provide as much valuable debugging info, but it does run a heck of a lot faster than a debug build.
 
 ## Features
 * Loading of the complete Quake 3 BSP file structure, plus implementation of several tree traversal and querying algorithms.
