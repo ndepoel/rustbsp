@@ -441,6 +441,8 @@ pub struct TexCoordModifier
     pub rotate: Deg<f32>,
     pub scroll: Vector2<f32>,
     pub scale: Vector2<f32>,
+    pub stretch: Vector4<f32>,  // x: base, y: amplitude, z: phase, w: frequency
+    pub turbulence: Vector4<f32>,  // x: base, y: amplitude, z: phase, w: frequency
 }
 
 impl Default for TexCoordModifier
@@ -452,6 +454,8 @@ impl Default for TexCoordModifier
             rotate: Deg(0.0),
             scroll: Vector2::new(0.0, 0.0),
             scale: Vector2::new(1.0, 1.0),
+            stretch: Vector4::new(1.0, 0.0, 0.0, 0.0),
+            turbulence: Vector4::new(1.0, 0.0, 0.0, 0.0),
         }
     }
 }
@@ -594,6 +598,16 @@ fn parse_tc_mod(chars: &mut Chars<'_>, tc_mod: &mut TexCoordModifier)
         Some(token) if token.to_lowercase() == "rotate" => tc_mod.rotate = Deg(next(&mut iter, 0.0)),
         Some(token) if token.to_lowercase() == "scroll" => tc_mod.scroll = Vector2::new(next(&mut iter, 0.0), next(&mut iter, 0.0)),
         Some(token) if token.to_lowercase() == "scale" => tc_mod.scale = Vector2::new(next(&mut iter, 1.0), next(&mut iter, 1.0)),
+        Some(token) if token.to_lowercase() == "stretch" => tc_mod.stretch = 
+        {
+            let _func = iter.next();    // Ignored, we use sine waves for everything
+            let base = next(&mut iter, 1.0);
+            let amplitude = next(&mut iter, 0.0);
+            let phase = next(&mut iter, 0.0);
+            let frequency = next(&mut iter, 0.0);
+            Vector4::new(base, amplitude, phase, frequency)
+        },
+        Some(token) if token.to_lowercase() == "turb" => tc_mod.turbulence = Vector4::new(next(&mut iter, 1.0), next(&mut iter, 0.0), next(&mut iter, 0.0), next(&mut iter, 0.0)),
         _ => { },
     }
 }
