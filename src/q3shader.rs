@@ -235,7 +235,7 @@ pub fn load_image_file(tex_name: &str) -> ImageResult<RgbaImage>
     if file_path.is_file()
     {
         //println!("Loading texture from file: {}", file_path.to_string_lossy());
-        Ok(image::open(file_path.to_str().unwrap())?.into_rgba())
+        Ok(image::open(file_path.to_str().unwrap())?.into_rgba8())
     }
     else
     {
@@ -265,7 +265,7 @@ pub fn save_image_file(image: &RgbaImage, name: &str, is_masked: bool, overwrite
     }
     else
     {
-        let rgb_img = image::DynamicImage::ImageRgba8(image.clone()).into_rgb();
+        let rgb_img = image::DynamicImage::ImageRgba8(image.clone()).into_rgb8();
         rgb_img.save(path).unwrap();
     }
 }

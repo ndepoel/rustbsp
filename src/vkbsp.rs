@@ -3,7 +3,7 @@ extern crate image;
 use vulkano::
 {
     device::{ Device, Queue },
-    command_buffer::{ AutoCommandBufferBuilder, AutoCommandBuffer, DynamicState },
+    command_buffer::{ AutoCommandBufferBuilder, AutoCommandBuffer, DynamicState, SubpassContents },
     pipeline::{ GraphicsPipeline, GraphicsPipelineAbstract, GraphicsPipelineCreationError },
     pipeline::blend::{ AttachmentBlend, BlendOp, BlendFactor },
     buffer::{ BufferUsage, ImmutableBuffer, cpu_pool::CpuBufferPool, BufferSlice, BufferAccess },
@@ -11,7 +11,7 @@ use vulkano::
     sync::GpuFuture,
     descriptor::{ DescriptorSet, PipelineLayoutAbstract },
     descriptor::descriptor_set::{ DescriptorSetsCollection, PersistentDescriptorSet, PersistentDescriptorSetBuildError },
-    image::{ ImmutableImage, Dimensions, traits::ImageViewAccess, sys::ImageCreationError },
+    image::{ ImmutableImage, Dimensions, MipmapsCount, traits::ImageViewAccess, sys::ImageCreationError },
     format::{ Format },
     sampler::{ Sampler, SamplerAddressMode, Filter, MipmapMode },
 };
@@ -380,7 +380,7 @@ fn create_fallback_texture(queue: Arc<Queue>) -> Result<Arc<TextureImage>, Image
             buf[i + 3] = 64u8;
         }
     }
-    let (tex, future) = ImmutableImage::from_iter(buf.iter().cloned(), Dimensions::Dim2d { width: 64, height: 64 }, Format::R8G8B8A8Unorm, queue.clone())?;
+    let (tex, future) = ImmutableImage::from_iter(buf.iter().cloned(), Dimensions::Dim2d { width: 64, height: 64 }, MipmapsCount::One, Format::R8G8B8A8Unorm, queue.clone())?;
     future.flush().unwrap();
     Ok(tex)
 }
@@ -446,7 +446,7 @@ fn create_lightgrid_textures(queue: Arc<Queue>, dimensions: Vector3::<usize>, li
         buf[i * 4 + 2] = ambient[2];
         buf[i * 4 + 3] = light_volume.direction[1];
     }
-    let (tex_a, future) = ImmutableImage::from_iter(buf.iter().cloned(), Dimensions::Dim3d { width: w as u32, height: h as u32, depth: d as u32 }, Format::R8G8B8A8Unorm, queue.clone())?;
+    let (tex_a, future) = ImmutableImage::from_iter(buf.iter().cloned(), Dimensions::Dim3d { width: w as u32, height: h as u32, depth: d as u32 }, MipmapsCount::One, Format::R8G8B8A8Unorm, queue.clone())?;
     future.flush().unwrap();
 
     // The second 3D texture contains directional light color values and the longitude part of the direction
@@ -459,7 +459,7 @@ fn create_lightgrid_textures(queue: Arc<Queue>, dimensions: Vector3::<usize>, li
         buf[i * 4 + 2] = directional[2];
         buf[i * 4 + 3] = light_volume.direction[0];
     }
-    let (tex_b, future) = ImmutableImage::from_iter(buf.iter().cloned(), Dimensions::Dim3d { width: w as u32, height: h as u32, depth: d as u32 }, Format::R8G8B8A8Unorm, queue.clone())?;
+    let (tex_b, future) = ImmutableImage::from_iter(buf.iter().cloned(), Dimensions::Dim3d { width: w as u32, height: h as u32, depth: d as u32 }, MipmapsCount::One, Format::R8G8B8A8Unorm, queue.clone())?;
     future.flush().unwrap();
 
     Ok((tex_a, tex_b))
@@ -852,7 +852,7 @@ impl vkcore::RendererAbstract for BspRenderer
         // a single draw call contains the pipeline (i.e. material) to use, the vertex buffer (and indices) to use, and the dynamic rendering parameters to be passed to the shaders.
         let clear_values = vec!([0.1921, 0.3019, 0.4745, 1.0].into(), (1f32, 1u32).into());
         let mut builder = AutoCommandBufferBuilder::primary_one_time_submit(self.device.clone(), self.queue.family()).unwrap();
-        builder.begin_render_pass(framebuffer.clone(), false, clear_values).unwrap();
+        builder.begin_render_pass(framebuffer.clone(), SubpassContents::Inline, clear_values).unwrap();
 
         // Recursively draw the BSP tree starting at node 0, while keeping track of which surfaces have already been rendered.
         let mut render_state = RenderState::new(self.world.surfaces.len());
