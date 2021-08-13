@@ -3,7 +3,7 @@ use vulkano::{
     device::{ Device, Features },
     swapchain::{ Swapchain, SurfaceTransform, PresentMode, ColorSpace, FullscreenExclusive },
     swapchain,
-    image::{ SwapchainImage, attachment::AttachmentImage },
+    image::{ SwapchainImage, view::ImageView, attachment::AttachmentImage },
     command_buffer::{ AutoCommandBuffer, DynamicState },
     framebuffer::{ Framebuffer, FramebufferAbstract, RenderPassAbstract },
     sync::{ GpuFuture, FlushError },
@@ -416,14 +416,15 @@ fn window_size_dependent_setup(
     };
     dynamic_state.viewports = Some(vec!(viewport));
 
-    let depth_buffer = AttachmentImage::transient(device.clone(), dimensions, Format::D24Unorm_S8Uint).unwrap();
+    let depth_buffer = ImageView::new(AttachmentImage::transient(device.clone(), dimensions, Format::D24Unorm_S8Uint).unwrap()).unwrap();
 
     // This seems to create and bind framebuffers to each of the swapchain images
     // For multi-pass rendering I guess we'd create multiple framebuffers, one for each pass, with size and format appropriate for that pass
     images.iter().map(|image| {
+        let view = ImageView::new(image.clone()).unwrap();
         Arc::new(
             Framebuffer::start(render_pass.clone())
-                .add(image.clone()).unwrap()
+                .add(view).unwrap()
                 .add(depth_buffer.clone()).unwrap()
                 .build().unwrap()
         ) as Arc<dyn FramebufferAbstract + Send + Sync>

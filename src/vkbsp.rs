@@ -11,7 +11,7 @@ use vulkano::
     sync::GpuFuture,
     descriptor::{ DescriptorSet, PipelineLayoutAbstract },
     descriptor::descriptor_set::{ DescriptorSetsCollection, PersistentDescriptorSet, PersistentDescriptorSetBuildError },
-    image::{ ImmutableImage, Dimensions, MipmapsCount, traits::ImageViewAccess, sys::ImageCreationError },
+    image::{ ImmutableImage, ImageDimensions, MipmapsCount, ImageViewAbstract, view::ImageView, sys::ImageCreationError },
     format::{ Format },
     sampler::{ Sampler, SamplerAddressMode, Filter, MipmapMode },
 };
@@ -128,7 +128,7 @@ struct Samplers
 // These type designations are NOT nice, but using a BufferAccess trait here didn't cut it
 type VertexSlice = BufferSlice<[bsp::Vertex], Arc<ImmutableBuffer<[bsp::Vertex]>>>;
 type IndexSlice = BufferSlice<[u32], Arc<ImmutableBuffer<[u32]>>>;
-type TextureImage = dyn ImageViewAccess + Send + Sync;
+type TextureImage = dyn ImageViewAbstract + Send + Sync;
 type TextureArray = Vec<Box<dyn Texture>>;
 
 trait Texture
@@ -380,9 +380,9 @@ fn create_fallback_texture(queue: Arc<Queue>) -> Result<Arc<TextureImage>, Image
             buf[i + 3] = 64u8;
         }
     }
-    let (tex, future) = ImmutableImage::from_iter(buf.iter().cloned(), Dimensions::Dim2d { width: 64, height: 64 }, MipmapsCount::One, Format::R8G8B8A8Unorm, queue.clone())?;
+    let (tex, future) = ImmutableImage::from_iter(buf.iter().cloned(), ImageDimensions::Dim2d { width: 64, height: 64, array_layers: 1 }, MipmapsCount::One, Format::R8G8B8A8Unorm, queue.clone())?;
     future.flush().unwrap();
-    Ok(tex)
+    Ok(ImageView::new(tex).unwrap())
 }
 
 fn load_texture(queue: Arc<Queue>, img: RgbaImage, mipmap: bool) -> Result<Box<dyn Texture>, ImageCreationError>
@@ -446,7 +446,7 @@ fn create_lightgrid_textures(queue: Arc<Queue>, dimensions: Vector3::<usize>, li
         buf[i * 4 + 2] = ambient[2];
         buf[i * 4 + 3] = light_volume.direction[1];
     }
-    let (tex_a, future) = ImmutableImage::from_iter(buf.iter().cloned(), Dimensions::Dim3d { width: w as u32, height: h as u32, depth: d as u32 }, MipmapsCount::One, Format::R8G8B8A8Unorm, queue.clone())?;
+    let (tex_a, future) = ImmutableImage::from_iter(buf.iter().cloned(), ImageDimensions::Dim3d { width: w as u32, height: h as u32, depth: d as u32 }, MipmapsCount::One, Format::R8G8B8A8Unorm, queue.clone())?;
     future.flush().unwrap();
 
     // The second 3D texture contains directional light color values and the longitude part of the direction
@@ -459,10 +459,10 @@ fn create_lightgrid_textures(queue: Arc<Queue>, dimensions: Vector3::<usize>, li
         buf[i * 4 + 2] = directional[2];
         buf[i * 4 + 3] = light_volume.direction[0];
     }
-    let (tex_b, future) = ImmutableImage::from_iter(buf.iter().cloned(), Dimensions::Dim3d { width: w as u32, height: h as u32, depth: d as u32 }, MipmapsCount::One, Format::R8G8B8A8Unorm, queue.clone())?;
+    let (tex_b, future) = ImmutableImage::from_iter(buf.iter().cloned(), ImageDimensions::Dim3d { width: w as u32, height: h as u32, depth: d as u32 }, MipmapsCount::One, Format::R8G8B8A8Unorm, queue.clone())?;
     future.flush().unwrap();
 
-    Ok((tex_a, tex_b))
+    Ok((ImageView::new(tex_a).unwrap(), ImageView::new(tex_b).unwrap()))
 }
 
 // This code is converted from the Quake 3 source. Turns out they *do* process the lighting data before loading it into textures,
