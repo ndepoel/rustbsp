@@ -4,8 +4,8 @@ use vulkano::{
     swapchain::{ Swapchain, SurfaceTransform, PresentMode, ColorSpace, FullscreenExclusive },
     swapchain,
     image::{ SwapchainImage, view::ImageView, attachment::AttachmentImage },
-    command_buffer::{ AutoCommandBuffer, DynamicState },
-    framebuffer::{ Framebuffer, FramebufferAbstract, RenderPassAbstract },
+    command_buffer::{ PrimaryAutoCommandBuffer, DynamicState },
+    render_pass::{ Framebuffer, FramebufferAbstract, RenderPass },
     sync::{ GpuFuture, FlushError },
     sync,
     pipeline::{ viewport::Viewport },
@@ -33,7 +33,7 @@ use super::frustum;
 
 pub trait RendererAbstract
 {
-    fn draw(&self, camera: &Camera, framebuffer: Arc<dyn FramebufferAbstract + Send + Sync>, dynamic_state: &mut DynamicState) -> AutoCommandBuffer;
+    fn draw(&self, camera: &Camera, framebuffer: Arc<dyn FramebufferAbstract + Send + Sync>, dynamic_state: &mut DynamicState) -> PrimaryAutoCommandBuffer;
 }
 
 pub struct Camera
@@ -227,10 +227,14 @@ pub fn init(world: bsp::World, entities: Vec<entity::Entity>, shaders: HashMap<S
         let format = caps.supported_formats[0].0;   // NOTE this now defaults to Unorm format. Not sure if we should prefer sRGB instead.
         println!("Dimensions: {:?}, alpha: {:?}, format: {:?}", dimensions, alpha, format);
 
-        Swapchain::new(device.clone(), surface.clone(),
-            caps.min_image_count, format, dimensions, 1, caps.supported_usage_flags, &queue,
-            SurfaceTransform::Identity, alpha, PresentMode::Fifo, FullscreenExclusive::Default,
-            true, ColorSpace::SrgbNonLinear)
+        Swapchain::start(device.clone(), surface.clone())
+            .num_images(caps.min_image_count)
+            .format(format)
+            .dimensions(dimensions)
+            .usage(caps.supported_usage_flags)
+            .sharing_mode(&queue)
+            .composite_alpha(alpha)
+            .build()
             .expect("failed to create swapchain")
     };
 
@@ -403,7 +407,7 @@ pub fn init(world: bsp::World, entities: Vec<entity::Entity>, shaders: HashMap<S
 fn window_size_dependent_setup(
     device: Arc<Device>,
     images: &[Arc<SwapchainImage<Window>>],
-    render_pass: Arc<dyn RenderPassAbstract + Send + Sync>,
+    render_pass: Arc<RenderPass>,
     dynamic_state: &mut DynamicState
 ) -> Vec<Arc<dyn FramebufferAbstract + Send + Sync>> {
     let dimensions = images[0].dimensions();

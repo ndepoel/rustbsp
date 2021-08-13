@@ -3,11 +3,11 @@ extern crate image;
 use vulkano::
 {
     device::{ Device, Queue },
-    command_buffer::{ AutoCommandBufferBuilder, AutoCommandBuffer, DynamicState, SubpassContents },
+    command_buffer::{ AutoCommandBufferBuilder, PrimaryAutoCommandBuffer, CommandBufferUsage, DynamicState, SubpassContents },
     pipeline::{ GraphicsPipeline, GraphicsPipelineAbstract, GraphicsPipelineCreationError },
     pipeline::blend::{ AttachmentBlend, BlendOp, BlendFactor },
     buffer::{ BufferUsage, ImmutableBuffer, cpu_pool::CpuBufferPool, BufferSlice, BufferAccess },
-    framebuffer::{ FramebufferAbstract, Subpass, RenderPassAbstract },
+    render_pass::{ FramebufferAbstract, Subpass, RenderPass },
     sync::GpuFuture,
     descriptor::{ DescriptorSet, PipelineLayoutAbstract },
     descriptor::descriptor_set::{ DescriptorSetsCollection, PersistentDescriptorSet, PersistentDescriptorSetBuildError },
@@ -114,7 +114,7 @@ struct Shaders
 struct Pipelines
 {
     device: Arc<Device>,
-    render_pass: Arc<dyn RenderPassAbstract + Send + Sync>, // TODO: currently we're only using one renderpass, but my gut tells me for multi-pass rendering this should go somewhere else
+    render_pass: Arc<RenderPass>, // TODO: currently we're only using one renderpass, but my gut tells me for multi-pass rendering this should go somewhere else
     shaders: Shaders,
     pipelines: HashMap<u64, Arc<dyn GraphicsPipelineAbstract + Send + Sync>>,
 }
@@ -205,10 +205,12 @@ impl TexCoordModifier for q3shader::TexCoordModifier
     }
 }
 
+type CommandBufferBuilder = AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>;
+
 trait SurfaceRenderer
 {
     fn is_transparent(&self) -> bool;
-    fn draw_surface(&self, builder: &mut AutoCommandBufferBuilder, camera: &vkcore::Camera, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>);
+    fn draw_surface(&self, builder: &mut CommandBufferBuilder, camera: &vkcore::Camera, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>);
 }
 
 struct NoopSurfaceRenderer
@@ -257,7 +259,7 @@ impl TexCoordModifier for SkySurfaceRenderer
 type MeshSurfaceRenderer = PlanarSurfaceRenderer;   // At the moment these two work identically, but conceptually I'd like to keep them distinct
 
 // We actually might want to pull the renderpass and framebuffer creation into here as well, to allow more flexibility in what and how we render. That's something for later though.
-pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<dyn RenderPassAbstract + Send + Sync>, world: bsp::World, shader_defs: HashMap<String, q3shader::Shader>) -> impl vkcore::RendererAbstract
+pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<RenderPass>, world: bsp::World, shader_defs: HashMap<String, q3shader::Shader>) -> impl vkcore::RendererAbstract
 {
     let mut pipelines = Pipelines::init(device.clone(), render_pass.clone());
 
@@ -642,7 +644,7 @@ fn create_surface_renderer(
 
 impl Pipelines
 {
-    pub fn init(device: Arc<Device>, render_pass: Arc<dyn RenderPassAbstract + Send + Sync>) -> Self
+    pub fn init(device: Arc<Device>, render_pass: Arc<RenderPass>) -> Self
     {
         Self
         {
@@ -823,7 +825,7 @@ impl RenderState
 impl vkcore::RendererAbstract for BspRenderer
 {
     // This will probably morph into a function that returns a bunch of CommandBuffers to execute eventually
-    fn draw(&self, camera: &vkcore::Camera, framebuffer: Arc<dyn FramebufferAbstract + Send + Sync>, dynamic_state: &mut DynamicState) -> AutoCommandBuffer
+    fn draw(&self, camera: &vkcore::Camera, framebuffer: Arc<dyn FramebufferAbstract + Send + Sync>, dynamic_state: &mut DynamicState) -> PrimaryAutoCommandBuffer
     {
         let leaf_index = self.world.leaf_at_position(camera.position);
         let cam_leaf = &self.world.leafs[leaf_index];
@@ -851,7 +853,7 @@ impl vkcore::RendererAbstract for BspRenderer
         // The command buffer contains the instructions to be executed to render things specifically for this frame:
         // a single draw call contains the pipeline (i.e. material) to use, the vertex buffer (and indices) to use, and the dynamic rendering parameters to be passed to the shaders.
         let clear_values = vec!([0.1921, 0.3019, 0.4745, 1.0].into(), (1f32, 1u32).into());
-        let mut builder = AutoCommandBufferBuilder::primary_one_time_submit(self.device.clone(), self.queue.family()).unwrap();
+        let mut builder = AutoCommandBufferBuilder::primary(self.device.clone(), self.queue.family(), CommandBufferUsage::OneTimeSubmit).unwrap();
         builder.begin_render_pass(framebuffer.clone(), SubpassContents::Inline, clear_values).unwrap();
 
         // Recursively draw the BSP tree starting at node 0, while keeping track of which surfaces have already been rendered.
@@ -882,7 +884,7 @@ impl vkcore::RendererAbstract for BspRenderer
 
 impl BspRenderer
 {
-    fn draw_node(&self, node_index: i32, camera: &vkcore::Camera, cluster: i32, render_state: &mut RenderState, builder: &mut AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
+    fn draw_node(&self, node_index: i32, camera: &vkcore::Camera, cluster: i32, render_state: &mut RenderState, builder: &mut CommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
     {
         if node_index < 0
         {
@@ -916,7 +918,7 @@ impl BspRenderer
         self.draw_node(last, camera, cluster, render_state, builder, dynamic_state, uniforms.clone());
     }
 
-    fn draw_leaf(&self, leaf: &bsp::Leaf, camera: &vkcore::Camera, render_state: &mut RenderState, builder: &mut AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
+    fn draw_leaf(&self, leaf: &bsp::Leaf, camera: &vkcore::Camera, render_state: &mut RenderState, builder: &mut CommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
     {
         for leaf_surf_index in leaf.first_surface..(leaf.first_surface + leaf.num_surfaces)
         {
@@ -947,7 +949,7 @@ impl BspRenderer
         }
     }
 
-    fn draw_model(&self, model: &bsp::Model, camera: &vkcore::Camera, render_state: &mut RenderState, builder: &mut AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
+    fn draw_model(&self, model: &bsp::Model, camera: &vkcore::Camera, render_state: &mut RenderState, builder: &mut CommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
     {
         for model_surf_index in model.first_surface..(model.first_surface + model.num_surfaces)
         {
@@ -973,7 +975,7 @@ impl BspRenderer
         }
     }
 
-    fn draw_transparent(&self, surface_index: usize, camera: &vkcore::Camera, builder: &mut AutoCommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
+    fn draw_transparent(&self, surface_index: usize, camera: &vkcore::Camera, builder: &mut CommandBufferBuilder, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
     {
         let renderer = &self.surface_renderers[surface_index];
         renderer.draw_surface(builder, camera, dynamic_state, uniforms.clone());
@@ -984,7 +986,7 @@ impl SurfaceRenderer for NoopSurfaceRenderer
 {
     fn is_transparent(&self) -> bool { false }
 
-    fn draw_surface(&self, _builder: &mut AutoCommandBufferBuilder, _camera: &vkcore::Camera, _dynamic_state: &mut DynamicState, _uniforms: Arc<dyn DescriptorSet + Sync + Send>)
+    fn draw_surface(&self, _builder: &mut CommandBufferBuilder, _camera: &vkcore::Camera, _dynamic_state: &mut DynamicState, _uniforms: Arc<dyn DescriptorSet + Sync + Send>)
     {
     }
 }
@@ -993,7 +995,7 @@ impl SurfaceRenderer for PlanarSurfaceRenderer
 {
     fn is_transparent(&self) -> bool { self.is_transparent }
 
-    fn draw_surface(&self, builder: &mut AutoCommandBufferBuilder, camera: &vkcore::Camera, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
+    fn draw_surface(&self, builder: &mut CommandBufferBuilder, camera: &vkcore::Camera, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
     {
         // TODO Building secondary command buffers per surface or leaf would probably speed this up a whole lot => tried it, but you can't pass dynamic state or per-frame uniforms to a pre-built secondary command buffer :/
         // TODO This could possibly be done more efficiently using indirect drawing instead of using buffer slices, but I'm getting stuck with Vulkano's arcane type requirements
@@ -1009,7 +1011,7 @@ impl SurfaceRenderer for PatchSurfaceRenderer
 {
     fn is_transparent(&self) -> bool { self.is_transparent }
 
-    fn draw_surface(&self, builder: &mut AutoCommandBufferBuilder, camera: &vkcore::Camera, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
+    fn draw_surface(&self, builder: &mut CommandBufferBuilder, camera: &vkcore::Camera, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
     {
         let sets = (uniforms.clone(), self.descriptor_set.clone());
         let pc = create_vertex_mods(self.tex_coord_mod.as_ref(), self.vertex_wave, camera.time, 0.0);
@@ -1021,7 +1023,7 @@ impl SurfaceRenderer for SkySurfaceRenderer
 {
     fn is_transparent(&self) -> bool { false }
 
-    fn draw_surface(&self, builder: &mut AutoCommandBufferBuilder, camera: &vkcore::Camera, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
+    fn draw_surface(&self, builder: &mut CommandBufferBuilder, camera: &vkcore::Camera, dynamic_state: &mut DynamicState, uniforms: Arc<dyn DescriptorSet + Sync + Send>)
     {
         let sets = (uniforms.clone(), self.descriptor_set.clone());
         let pc = create_vertex_mods(self, Vector4::new(1.0, 0.0, 0.0, 0.0), camera.time, 0.0);
