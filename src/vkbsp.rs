@@ -285,11 +285,11 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<RenderPass>
         repeat: Sampler::new(device.clone(), 
             Filter::Linear, Filter::Linear, MipmapMode::Linear,
             SamplerAddressMode::Repeat, SamplerAddressMode::Repeat, SamplerAddressMode::Repeat,
-            0.0, 16.0, 0.0, 0.0).unwrap(),
+            0.0, 16.0, 0.0, 10.0).unwrap(),
         clamp: Sampler::new(device.clone(), 
             Filter::Linear, Filter::Linear, MipmapMode::Linear,
             SamplerAddressMode::ClampToEdge, SamplerAddressMode::ClampToEdge, SamplerAddressMode::ClampToEdge,
-            0.0, 16.0, 0.0, 0.0).unwrap(),
+            0.0, 16.0, 0.0, 10.0).unwrap(),
     };
 
     let fallback_tex = create_fallback_texture(queue.clone()).unwrap();
@@ -312,7 +312,7 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<RenderPass>
                 // Some textures are referenced through a shader definition
                 match shader_def.load_image()
                 {
-                    Ok(img) => load_texture(queue.clone(), img, false).unwrap(),
+                    Ok(img) => load_texture(queue.clone(), img, true).unwrap(),
                     _ => load_texture_file(queue.clone(), shader.name()).unwrap()
                 }
             },
@@ -403,7 +403,7 @@ fn load_texture(queue: Arc<Queue>, img: RgbaImage, mipmap: bool) -> Result<Box<d
 
 fn load_animated_texture(queue: Arc<Queue>, img: RgbaImage, frequency: f32, tex_coord_mod: Vec<(Vector2<f32>, Vector2<f32>)>) -> Result<Box<dyn Texture>, ImageCreationError>
 {
-    let (tex, future) = vkutil::load_texture_nomipmap(queue.clone(), img)?;
+    let (tex, future) = vkutil::load_texture_mipmapped(queue.clone(), img)?;
     future.flush().unwrap();
 
     Ok(Box::new(AnimatedTexture
@@ -418,7 +418,7 @@ fn load_texture_file(queue: Arc<Queue>, tex_name: &str) -> Result<Box<dyn Textur
 {
     match q3shader::load_image_file(tex_name)
     {
-        Ok(img) => load_texture(queue.clone(), img, false),
+        Ok(img) => load_texture(queue.clone(), img, true),
         Err(_) => Ok(Box::new(create_fallback_texture(queue.clone())?) as Box<_>),
     }
 }
