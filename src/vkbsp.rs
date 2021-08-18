@@ -123,6 +123,7 @@ struct Samplers
 {
     repeat: Arc<Sampler>,
     clamp: Arc<Sampler>,
+    sky: Arc<Sampler>,
 }
 
 // These type designations are NOT nice, but using a BufferAccess trait here didn't cut it
@@ -290,6 +291,10 @@ pub fn init(device: Arc<Device>, queue: Arc<Queue>, render_pass: Arc<RenderPass>
             Filter::Linear, Filter::Linear, MipmapMode::Linear,
             SamplerAddressMode::ClampToEdge, SamplerAddressMode::ClampToEdge, SamplerAddressMode::ClampToEdge,
             0.0, 16.0, 0.0, 10.0).unwrap(),
+        sky: Sampler::new(device.clone(), 
+            Filter::Linear, Filter::Linear, MipmapMode::Linear,
+            SamplerAddressMode::Repeat, SamplerAddressMode::Repeat, SamplerAddressMode::Repeat,
+            0.0, 16.0, 0.0, 0.0).unwrap(),
     };
 
     let fallback_tex = create_fallback_texture(queue.clone()).unwrap();
@@ -533,6 +538,7 @@ fn create_surface_renderer(
 
     let sampler = match wrap_mode
     {
+        _ if surface_flags.contains(bsp::SurfaceFlags::SKY) => samplers.sky.clone(),
         q3shader::WrapMode::Repeat => samplers.repeat.clone(),
         q3shader::WrapMode::Clamp => samplers.clamp.clone(),
     };
