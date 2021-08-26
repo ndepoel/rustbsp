@@ -1,11 +1,11 @@
 ## Introduction
 Welcome to RustBSP! This is my first serious project developing anything with the Rust programming language. Its intention was to implement something I'm familiar with (loading and rendering Quake 3 maps) while learning something I am unfamiliar with (Rust, and also a bit of Vulkan). This allowed me to really get invested in Rust and dig into its specific semantics and idioms, by building something significantly more complex than your typical "Hello World" program, but without having to figure out what it is that I'm building first. It gave me a clear vision and kept the learning process focused.
 
-In case the title doesn't give it away already, RustBSP allows you to load in and render BSP map files intended for the Quake 3 engine. It's something I have made before while in college, using C/C++ and OpenGL as the programming language and rendering API of choice. Remaking this today allowed me to make use of more modern rendering techiques, which was a fun exercise in itself. It also means I was able to implement more features and effects than I've ever done before.
+In case the title doesn't give it away already, RustBSP allows you to load in and render BSP map files intended for the Quake 3 engine. It's something I had made before while in college, using C/C++ and OpenGL as the programming language and graphics API of choice. Remaking this today allowed me to make use of more modern rendering techiques, which was a fun exercise in itself. It also meant I was able to implement more features and effects than I'd ever done before.
 
-Although the project's source is clearly the result of a learning process and some of the choices I've made along the way are questionable, I'm still quite happy with how this turned out. It was a valuable learning exercise in more ways than one, and it's fun to simply zoom around Quake's levels looking at all the fancy effects. However I don't think I'll be continuing with this project anytime soon. Right now the source code is on the cusp of becoming a mess, so it'll need a major design overhaul if I ever wanted to add any of the features I have been thinking about.
+Although the project's source is clearly the result of a learning process and some of the choices I've made along the way are questionable, I'm still quite happy with how this turned out. It was a valuable learning exercise in more ways than one, and it's fun to simply zoom around Quake's levels looking at all the fancy effects. However I don't think I'll be continuing with this project anytime soon. Right now the source code is on the cusp of becoming a mess, so it'll need a major design overhaul if I ever want to add any of the features I have been thinking about.
 
-The below video shows how RustBSP evolved over the weeks as I was developing it:
+The below video demonstrates what RustBSP can do and how the project evolved over the weeks as I was developing it:
 [![RustBSP Evolution](https://img.youtube.com/vi/tWlpmB3unrY/maxresdefault.jpg)](https://youtu.be/tWlpmB3unrY)
 
 ## What This Project Is
@@ -29,7 +29,7 @@ Download and install the following tools:
 * [Python](https://www.python.org/downloads/) (or install it through the Windows Store)
 
 As Ninja is a zipped executable download and it needs to be available on `PATH`, what I simply did was unzip the executable into CMake's `bin` directory.
-Vulkano's README recommends installing `msys2` and installing the above tools using `pacman` but you really don't need to do any of that.
+Vulkano's README recommends installing `msys2` and then installing the above tools using `pacman` but you don't really need to do any of that.
 
 After installing the above, `cargo build` should download and compile all the dependencies and build the application as expected. During development I often ran:
 ```
@@ -38,9 +38,9 @@ cargo run --release maps\[somemap].bsp
 to compile and test the application in one go. A release build will obviously take longer to compile and does not provide as much valuable debugging info, but it does run a heck of a lot faster than a debug build.
 
 ## How To Use
-RustBSP requires maps and data files from Quake 3 or a compatible mod to function. For copyright reasons I cannot include any art assets with this project, but I have included a single map (q3dm1.bsp) which was released as open source and that can be loaded as-is without any textures.
+RustBSP requires maps and data files from Quake 3 or a compatible mod to function. For copyright reasons I cannot include any art assets with this project, but I have included a single map (`q3dm1.bsp`) which was released as open source and that can be loaded as-is without any textures.
 
-If you want to see all the features that RustBSP has to offer, you will need a copy of Quake 3 and extract its data files to RustBSP's working directory. Quake 3 can be purchased for cheap on Steam or GOG. Open the game's installation directory and look for the .pk3 files inside the baseq3 directory. These are regular ZIP files that can be opened with any archiving tool such as WinZip or 7zip. From these archives, you will want to extract the following directories into RustBSP's working directory:
+If you want to see all the features that RustBSP has to offer, you will need a copy of Quake 3 and extract its data files to RustBSP's working directory. Quake 3 can be purchased for cheap on Steam or GOG. Open the game's installation directory and look for the `.pk3` files inside the `baseq3` directory. These are regular ZIP files that can be opened with any archiving tool such as WinZip or 7-Zip. From these archives, you will want to extract the following directories into RustBSP's working directory:
 
 * env
 * gfx
@@ -49,7 +49,7 @@ If you want to see all the features that RustBSP has to offer, you will need a c
 * scripts
 * textures
 
-When this is done, simply run the RustBSP executable with the .bsp file you want to load as its single startup argument, for example:
+When this is done, simply run the RustBSP executable with the `.bsp` file you want to load as its single startup argument, for example:
 ```
 rustbsp.exe maps\q3dm13.bsp
 ```
@@ -78,7 +78,7 @@ If you're working from RustBSP's source directory and are compiling the project 
 
 ## References
 
-Below is a list of all the research and reference materials used in the creation of this project. Not included: lots of Googling StackOverflow.
+Below is a list of all the research and reference materials used in the creation of this project. Not included: lots of googling Stack Overflow.
 
 ### Rust
 * Rust by Example: https://doc.rust-lang.org/stable/rust-by-example/index.html
@@ -87,7 +87,7 @@ Below is a list of all the research and reference materials used in the creation
 
 ### Vulkan
 * Vulkano Guide: https://vulkano.rs/guide/introduction
-* Vulkano API: https://docs.rs/vulkano/0.19.0/vulkano/
+* Vulkano API: https://docs.rs/vulkano/0.23.0/vulkano/
 * Vulkano Examples: https://github.com/vulkano-rs/vulkano-examples
 * Sascha Willems' Vulkan Examples: https://github.com/SaschaWillems/Vulkan
 * Vulkan Cookbook: https://github.com/PacktPublishing/Vulkan-Cookbook
