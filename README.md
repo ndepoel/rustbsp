@@ -1,6 +1,9 @@
 ## Introduction
+Welcome to RustBSP! This is my first serious project developing anything with the Rust programming language. Its intention was to implement something I'm familiar with (loading and rendering Quake 3 maps) while learning something I am unfamiliar with (Rust, and also a bit of Vulkan). This allowed me to really get invested in Rust and dig into its specific semantics and idioms, by building something significantly more complex than your typical "Hello World" program, but without having to figure out what it is that I'm building first. It gave me a clear vision and kept the learning process focused.
 
+In case the title doesn't give it away already, RustBSP allows you to load in and render BSP map files intended for the Quake 3 engine. It's something I have made before while in college, using C/C++ and OpenGL as the programming language and rendering API of choice. Remaking this today allowed me to make use of more modern rendering techiques, which was a fun exercise in itself. It also means I was able to implement more features and effects than I've ever done before.
 
+Although the project's source is clearly the result of a learning process and some of the choices I've made along the way are questionable, I'm still quite happy with how this turned out. It was a valuable learning exercise in more ways than one, and it's fun to simply zoom around Quake's levels looking at all the fancy effects. However I don't think I'll be continuing with this project anytime soon. Right now the source code is on the cusp of becoming a mess, so it'll need a major design overhaul if I ever wanted to add any of the features I have been thinking about.
 
 ## What This Project Is
 * A toy project primarily intended to learn Rust, and to a lesser extent to learn some Vulkan.
@@ -32,8 +35,24 @@ cargo run --release maps\[somemap].bsp
 to compile and test the application in one go. A release build will obviously take longer to compile and does not provide as much valuable debugging info, but it does run a heck of a lot faster than a debug build.
 
 ## How To Use
+RustBSP requires maps and data files from Quake 3 or a compatible mod to function. For copyright reasons I cannot include any art assets with this project, but I have included a single map (q3dm1.bsp) which was released as open source and that can be loaded as-is without any textures.
 
+If you want to see all the features that RustBSP has to offer, you will need a copy of Quake 3 and extract its data files to RustBSP's working directory. Quake 3 can be purchased for cheap on Steam or GOG. Open the game's installation directory and look for the .pk3 files inside the baseq3 directory. These are regular ZIP files that can be opened with any archiving tool such as WinZip or 7zip. From these archives, you will want to extract the following directories into RustBSP's working directory:
 
+* env
+* gfx
+* maps
+* models
+* scripts
+* textures
+
+When this is done, simply run the RustBSP executable with the .bsp file you want to load as its single startup argument, for example:
+```
+rustbsp.exe maps\q3dm13.bsp
+```
+RustBSP should automatically find and load any of the asset files that are required to render the map in full.
+
+If you're working from RustBSP's source directory and are compiling the project yourself, you can also instead use the `cargo run` command as mentioned in the previous section.
 
 ## Features
 * Loading of the complete Quake 3 BSP file structure, plus implementation of several tree traversal and querying algorithms.
@@ -53,15 +72,6 @@ to compile and test the application in one go. A release build will obviously ta
 * A more accurate sky implementation. I haven't completely figured out how Quake 3 implemented its sky, but it involves some funky vertex and texture coordinate manipulation to build a partial skybox on-the-fly, a technique which I don't think would translate well to GLSL shaders. Either way, I'm reasonably happy with the current skydome implementation, which looks convincing enough so long as you don't look straight up.
 * Collision detection. The BSP data structure contains bounding boxes for efficient tracing of ray collisions throughout the world. I've decided to not implement this yet as I've done it before and it's mostly just a lot of boring math programming. I might implement this at some point but it's low priority.
 * Volumetric fog rendering. Another key selling point from Quake 3 that I don't think would translate well to Vulkano and GLSL. I haven't really looked into this much; quite possibly I could think of a modern reinterpretation of this technique that would look accurate enough, but it's rather low priority.
-
-## A Few Words On Vulkano
-Someone looking at this project for the first time might wonder: why the choice for Vulkano as the graphics library? To be fair, I've asked myself this question several times over the course of its development, after running into several performance issues and functional limitations with Vulkano. But after all is said and done, I still stand by my original decision and think it was the right choice for this project. Let me explain.
-
-First of all, the primary goal of this project is and always has been to learn Rust and to touch upon as many Rustic idioms as possible. The goal was not to implement any groundbreaking new graphics techniques, though the option for experimentation always remained open. Hence I was not very interested in using any low-level graphics libraries that are merely simple FFI-wrappers around a C library with loads of unsafe code. I wanted something that uses idiomatic Rust with a primarily safe API. Also important was not to run into any complexity roadblocks that might inhibit my progress and demotivate me to keep going. My eye first fell upon Glium, which is a high abstraction Rustic wrapper for OpenGL; OpenGL being my first choice for graphics API as I was already familiar with that and it's conceptually similar to the previous BSP renderers that I've built. An alternative Vulkan renderer might have been an option further down the line. This would allow me to focus on solving just one specific problem, namely learning Rust and its intricacies.
-
-However upon diving into Glium, I discovered that it had already long been abandoned by its original author, citing the irrelevance of OpenGL and the overlap with other Vulkan-based frameworks. Additionally, Glium introduced enough new concepts on top of bare OpenGL that I would have to spend some time anyway learning how to use it properly. And if I'm going to spend time learning a framework, I'd rather spend it on one that isn't already regarded as obsolete by its original author. So based on their advice, I had a look at Vulkano instead and pledged to spend a bit of time going through its guides and learning the basics of the Vulkan API. Vulkano provides a similar high-level abstracted view of its underlying low-level API as Glium, with plenty of fascinating idiomatic Rust constructs to study and most importantly, a largely safe API. It would allow me to get on with the implementation of my Rust BSP Viewer without getting bogged down too much by the technical micro-details of pure Vulkan programming. It seemed to fit the bill quite well.
-
-Surely enough, Vulkano allowed me to get up and running very quickly and after a few days of playing around, I merged my Vulkano test project with my BSP code so far and managed to get something resembling a Quake level to render on the screen. 
 
 ## References
 
