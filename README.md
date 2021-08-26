@@ -5,6 +5,9 @@ In case the title doesn't give it away already, RustBSP allows you to load in an
 
 Although the project's source is clearly the result of a learning process and some of the choices I've made along the way are questionable, I'm still quite happy with how this turned out. It was a valuable learning exercise in more ways than one, and it's fun to simply zoom around Quake's levels looking at all the fancy effects. However I don't think I'll be continuing with this project anytime soon. Right now the source code is on the cusp of becoming a mess, so it'll need a major design overhaul if I ever wanted to add any of the features I have been thinking about.
 
+The below video shows how RustBSP evolved over the weeks as I was developing it:
+[![RustBSP Evolution](https://img.youtube.com/vi/tWlpmB3unrY/maxresdefault.jpg)](https://youtu.be/tWlpmB3unrY)
+
 ## What This Project Is
 * A toy project primarily intended to learn Rust, and to a lesser extent to learn some Vulkan.
 * An opportunity to experiment with and learn more about modern graphics rendering techniques.
