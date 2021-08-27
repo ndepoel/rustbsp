@@ -5,7 +5,7 @@ In case the title doesn't give it away already, RustBSP allows you to load in an
 
 Although the project's source is clearly the result of a learning process and some of the choices I've made along the way are questionable, I'm still quite happy with how this turned out. It was a valuable learning exercise in more ways than one, and it's fun to simply zoom around Quake's levels looking at all the fancy effects. However I don't think I'll be continuing with this project anytime soon. Right now the source code is on the cusp of becoming a mess, so it'll need a major design overhaul if I ever want to add any of the features I have been thinking about.
 
-The below video demonstrates what RustBSP can do and how the project evolved over the weeks as I was developing it:
+The below video shows what RustBSP can do and how the project evolved over the weeks as I was developing it:
 [![RustBSP Evolution](https://img.youtube.com/vi/tWlpmB3unrY/maxresdefault.jpg)](https://youtu.be/tWlpmB3unrY)
 
 ## What This Project Is
@@ -91,7 +91,7 @@ Below is a list of all the research and reference materials used in the creation
 * Vulkano Examples: https://github.com/vulkano-rs/vulkano-examples
 * Sascha Willems' Vulkan Examples: https://github.com/SaschaWillems/Vulkan
 * Vulkan Cookbook: https://github.com/PacktPublishing/Vulkan-Cookbook
-* Vulkan - A Specification (Tessellation): https://www.khronos.org/registry/vulkan/specs/1.1-extensions/html/chap22.html
+* Vulkan - A Specification (Tessellation): https://www.khronos.org/registry/vulkan/specs/1.1-extensions/html/chap23.html
 
 ### Quake 3
 * Unofficial Quake 3 BSP Format: http://www.hyrtwol.dk/wolfenstein/unofficial_quake3_bsp_format.md
