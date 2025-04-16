@@ -34,42 +34,42 @@ impl Frustum
     {
         let clip = projection * view;
 
-        let mut plane = &mut self.planes[PlaneType::Right as usize];
+        let plane = &mut self.planes[PlaneType::Right as usize];
         plane.normal.x = clip.x.w - clip.x.x;
         plane.normal.y = clip.y.w - clip.y.x;
         plane.normal.z = clip.z.w - clip.z.x;
         plane.distance = clip.w.w - clip.w.x;
         plane.normalize();
 
-        let mut plane = &mut self.planes[PlaneType::Left as usize];
+        let plane = &mut self.planes[PlaneType::Left as usize];
         plane.normal.x = clip.x.w + clip.x.x;
         plane.normal.y = clip.y.w + clip.y.x;
         plane.normal.z = clip.z.w + clip.z.x;
         plane.distance = clip.w.w + clip.w.x;
         plane.normalize();
 
-        let mut plane = &mut self.planes[PlaneType::Top as usize];
+        let plane = &mut self.planes[PlaneType::Top as usize];
         plane.normal.x = clip.x.w - clip.x.y;
         plane.normal.y = clip.y.w - clip.y.y;
         plane.normal.z = clip.z.w - clip.z.y;
         plane.distance = clip.w.w - clip.w.y;
         plane.normalize();
 
-        let mut plane = &mut self.planes[PlaneType::Bottom as usize];
+        let plane = &mut self.planes[PlaneType::Bottom as usize];
         plane.normal.x = clip.x.w + clip.x.y;
         plane.normal.y = clip.y.w + clip.y.y;
         plane.normal.z = clip.z.w + clip.z.y;
         plane.distance = clip.w.w + clip.w.y;
         plane.normalize();
 
-        let mut plane = &mut self.planes[PlaneType::Back as usize];
+        let plane = &mut self.planes[PlaneType::Back as usize];
         plane.normal.x = clip.x.w - clip.x.z;
         plane.normal.y = clip.y.w - clip.y.z;
         plane.normal.z = clip.z.w - clip.z.z;
         plane.distance = clip.w.w - clip.w.z;
         plane.normalize();
 
-        let mut plane = &mut self.planes[PlaneType::Front as usize];
+        let plane = &mut self.planes[PlaneType::Front as usize];
         plane.normal.x = clip.x.w + clip.x.z;
         plane.normal.y = clip.y.w + clip.y.z;
         plane.normal.z = clip.z.w + clip.z.z;

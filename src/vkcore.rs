@@ -254,7 +254,7 @@ pub fn init(world: bsp::World, entities: Vec<entity::Entity>, shaders: HashMap<S
             {
                 load: Clear,
                 store: DontCare,
-                format: Format::D24Unorm_S8Uint,
+                format: Format::D32Sfloat_S8Uint,
                 samples: 1,
             }
         },
@@ -420,7 +420,7 @@ fn window_size_dependent_setup(
     };
     dynamic_state.viewports = Some(vec!(viewport));
 
-    let depth_buffer = ImageView::new(AttachmentImage::transient(device.clone(), dimensions, Format::D24Unorm_S8Uint).unwrap()).unwrap();
+    let depth_buffer = ImageView::new(AttachmentImage::transient(device.clone(), dimensions, Format::D32Sfloat_S8Uint).unwrap()).unwrap();
 
     // This seems to create and bind framebuffers to each of the swapchain images
     // For multi-pass rendering I guess we'd create multiple framebuffers, one for each pass, with size and format appropriate for that pass
