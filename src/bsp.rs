@@ -543,7 +543,7 @@ pub fn load_world(file: &mut File) -> std::io::Result<World>
     println!("{:?}", header);
 
     let id = std::str::from_utf8(&header.id);
-    if id.is_err() || id.unwrap() != "IBSP" || header.version != 0x2E
+    if id.is_err() || id.unwrap() != "IBSP" || header.version != 0x30
     {
         return Err(Error::new(ErrorKind::InvalidData, "Invalid BSP header"));
     }

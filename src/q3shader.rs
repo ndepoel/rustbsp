@@ -220,7 +220,7 @@ impl Shader
 
 pub fn load_image_file(tex_name: &str) -> ImageResult<RgbaImage>
 {
-    let extensions = vec!("", "png", "tga", "jpg"); // Check PNG first so we can easily override Quake's TGA or JPG textures with our own substitutes
+    let extensions = vec!("", "png", "dds", "tga", "jpg"); // Check PNG first so we can easily override Quake's TGA or JPG textures with our own substitutes
 
     let mut file_path = PathBuf::from(tex_name);
     for ext in extensions.iter()
@@ -234,8 +234,16 @@ pub fn load_image_file(tex_name: &str) -> ImageResult<RgbaImage>
 
     if file_path.is_file()
     {
-        //println!("Loading texture from file: {}", file_path.to_string_lossy());
-        Ok(image::open(file_path.to_str().unwrap())?.into_rgba8())
+        // println!("Loading texture from file: {}", file_path.to_string_lossy());
+		match image::open(file_path.to_str().unwrap())
+		{
+			Ok(img) => Ok(img.into_rgba8()),
+			Err(error) =>
+			{
+				println!("Error loading texture {}: {}", tex_name, error);
+				Err(error)
+			}
+		}
     }
     else
     {
