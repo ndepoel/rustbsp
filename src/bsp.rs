@@ -1,13 +1,18 @@
 use std::fs::File;
+use std::io::empty;
 use std::io::prelude::*;
 use std::io::SeekFrom;
 use std::io::{Error, ErrorKind};
 use std::mem::{size_of, transmute};
 use std::fmt;
 use std::cmp;
+use std::str::FromStr;
 
 use cgmath::{Vector2, Vector3};
 use cgmath::prelude::*;
+
+use obj_exporter::Shape;
+use obj_exporter::{ObjSet, Object};
 
 // Enums in Rust are integer-counted by default like most other languages, starting at 0
 enum LumpType
@@ -438,6 +443,75 @@ impl World
         let z = (self.models[0].maxs[2] / 128.0).floor() - (self.models[0].mins[2] / 128.0).ceil() + 1.0;
 
         (Vector3::new(x as usize, y as usize, z as usize), -self.models[0].mins, 1.0 / (self.models[0].maxs - self.models[0].mins))
+    }
+
+    pub fn export_obj(&self, filename: &str) -> Result<(), std::io::Error>
+    {
+        let set = ObjSet {
+            material_library: None,
+            objects: vec![
+                Object 
+                {
+                    name: filename.to_owned(),
+                    vertices: self.vertices.iter().map(|v| obj_exporter::Vertex { x: v.position[0] as f64, y: v.position[1] as f64, z: v.position[2] as f64 }).collect(),
+                    tex_vertices: self.vertices.iter().map(|v| obj_exporter::TVertex { u: v.texture_coord[0] as f64, v: v.texture_coord[1] as f64, w: 0.0 }).collect(),
+                    normals: self.vertices.iter().map(|v| obj_exporter::Vertex { x: v.normal[0] as f64, y: v.normal[1] as f64, z: v.normal[2] as f64}).collect(),
+                    geometry: self.surfaces.iter().map(|s| self.surface_to_geometry(s)).flatten().collect(),
+                }
+            ],
+        };
+
+        obj_exporter::export_to_file(&set, filename)
+    }
+
+    fn surface_to_geometry(&self, surface: &Surface) -> Option<obj_exporter::Geometry>
+    {
+        let shader_name = self.shaders.get(surface.shader_id as usize).and_then(|s| Some(String::from(s.name())));
+        let surface_flags = self.shaders.get(surface.shader_id as usize).and_then(|t| Some(t.surface_flags)).unwrap_or(SurfaceFlags::empty());
+
+        match surface.surface_type
+        {
+            SurfaceType::Planar if !surface_flags.contains(SurfaceFlags::SKY) =>
+            {
+                Some(obj_exporter::Geometry { 
+                    material_name: shader_name, 
+                    shapes: self.surface_triangles(surface),
+                })
+            },
+            SurfaceType::Mesh =>
+            {
+                Some(obj_exporter::Geometry { 
+                    material_name: shader_name, 
+                    shapes: self.surface_triangles(surface),
+                })
+            },
+            _ => None,
+        }
+    }
+
+    fn surface_triangles(&self, surface: &Surface) -> Vec<obj_exporter::Shape>
+    {
+        let mut shapes = vec![];
+
+        let mut index_offset = 0;
+        while index_offset < surface.num_indices
+        {
+            let index = (surface.first_index + index_offset) as usize;
+            let x = (surface.first_vertex + self.indices[index + 0] as i32) as usize;
+            let y = (surface.first_vertex + self.indices[index + 1] as i32) as usize;
+            let z = (surface.first_vertex + self.indices[index + 2] as i32) as usize;
+
+            shapes.push(Shape
+            {
+                primitive: obj_exporter::Primitive::Triangle((z, Some(z), Some(z)), (y, Some(y), Some(y)), (x, Some(x), Some(x))),
+                groups: vec![],
+                smoothing_groups: vec![]
+            });
+
+            index_offset += 3;
+        }
+
+        shapes
     }
 }
 

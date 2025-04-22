@@ -34,6 +34,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>>
 
     let mut file = File::open(&args[1])?;
     let world = bsp::load_world(&mut file)?;
+    println!("{}", world);
+
+    world.export_obj("export.obj")?;
 
     let entities = entity::parse_entities(&world.entities);
     println!("Parsed {} entities", entities.len());
