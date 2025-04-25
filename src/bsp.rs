@@ -1,8 +1,11 @@
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::empty;
+use std::io::BufWriter;
 use std::io::prelude::*;
 use std::io::SeekFrom;
 use std::io::{Error, ErrorKind};
+use std::iter::Map;
 use std::mem::{size_of, transmute};
 use std::fmt;
 use std::cmp;
@@ -11,8 +14,7 @@ use std::str::FromStr;
 use cgmath::{Vector2, Vector3};
 use cgmath::prelude::*;
 
-use obj_exporter::Shape;
-use obj_exporter::{ObjSet, Object};
+use itertools::Itertools;
 
 // Enums in Rust are integer-counted by default like most other languages, starting at 0
 enum LumpType
@@ -447,71 +449,68 @@ impl World
 
     pub fn export_obj(&self, filename: &str) -> Result<(), std::io::Error>
     {
-        let set = ObjSet {
-            material_library: None,
-            objects: vec![
-                Object 
+        let file = std::fs::File::create(filename)?;
+        let mut writer = BufWriter::new(file);
+
+        for v in self.vertices.iter()
+        {
+            writeln!(writer, "v {:.6} {:.6} {:.6}", v.position[0], v.position[1], v.position[2])?;
+        }
+        
+        writeln!(writer)?;
+
+        for vt in self.vertices.iter()
+        {
+            writeln!(writer, "vt {:.6} {:.6}", vt.texture_coord[0], vt.texture_coord[1])?;
+        }
+
+        writeln!(writer)?;
+
+        for vn in self.vertices.iter()
+        {
+            writeln!(writer, "vn {:.6} {:.6} {:.6}", vn.normal[0], vn.normal[1], vn.normal[2])?;
+        }
+
+        writeln!(writer)?;
+
+        for (key, group) in self.surfaces.iter().into_group_map_by(|s| self.shaders.get(s.shader_id as usize).and_then(|s| Some(String::from(s.name()))).unwrap_or_default())
+        {
+            writeln!(writer, "o {}", key)?;
+            writeln!(writer, "usemtl {}", key)?;
+
+            for surface in group
+            {
+                let surface_flags = self.shaders.get(surface.shader_id as usize).and_then(|t| Some(t.surface_flags)).unwrap_or(SurfaceFlags::empty());
+
+                match surface.surface_type
                 {
-                    name: filename.to_owned(),
-                    vertices: self.vertices.iter().map(|v| obj_exporter::Vertex { x: v.position[0] as f64, y: v.position[1] as f64, z: v.position[2] as f64 }).collect(),
-                    tex_vertices: self.vertices.iter().map(|v| obj_exporter::TVertex { u: v.texture_coord[0] as f64, v: v.texture_coord[1] as f64, w: 0.0 }).collect(),
-                    normals: self.vertices.iter().map(|v| obj_exporter::Vertex { x: v.normal[0] as f64, y: v.normal[1] as f64, z: v.normal[2] as f64}).collect(),
-                    geometry: self.surfaces.iter().map(|s| self.surface_to_geometry(s)).flatten().collect(),
+                    SurfaceType::Mesh | SurfaceType::Planar if !surface_flags.contains(SurfaceFlags::SKY) =>
+                    {
+                        let mut index_offset = 0;
+                        while index_offset < surface.num_indices
+                        {
+                            let index = (surface.first_index + index_offset) as usize;
+                            let x = (surface.first_vertex + self.indices[index + 2] as i32) as usize + 1;
+                            let y = (surface.first_vertex + self.indices[index + 1] as i32) as usize + 1;
+                            let z = (surface.first_vertex + self.indices[index + 0] as i32) as usize + 1;
+                
+                            write!(writer, "f")?;
+                            write!(writer, " {}/{}/{}", x, x, x)?;
+                            write!(writer, " {}/{}/{}", y, y, y)?;
+                            write!(writer, " {}/{}/{}", z, z, z)?;
+                            writeln!(writer)?;
+                
+                            index_offset += 3;
+                        }
+                    },
+                    _ => {},
                 }
-            ],
-        };
+            }
 
-        obj_exporter::export_to_file(&set, filename)
-    }
-
-    fn surface_to_geometry(&self, surface: &Surface) -> Option<obj_exporter::Geometry>
-    {
-        let shader_name = self.shaders.get(surface.shader_id as usize).and_then(|s| Some(String::from(s.name())));
-        let surface_flags = self.shaders.get(surface.shader_id as usize).and_then(|t| Some(t.surface_flags)).unwrap_or(SurfaceFlags::empty());
-
-        match surface.surface_type
-        {
-            SurfaceType::Planar if !surface_flags.contains(SurfaceFlags::SKY) =>
-            {
-                Some(obj_exporter::Geometry { 
-                    material_name: shader_name, 
-                    shapes: self.surface_triangles(surface),
-                })
-            },
-            SurfaceType::Mesh =>
-            {
-                Some(obj_exporter::Geometry { 
-                    material_name: shader_name, 
-                    shapes: self.surface_triangles(surface),
-                })
-            },
-            _ => None,
-        }
-    }
-
-    fn surface_triangles(&self, surface: &Surface) -> Vec<obj_exporter::Shape>
-    {
-        let mut shapes = vec![];
-
-        let mut index_offset = 0;
-        while index_offset < surface.num_indices
-        {
-            let index = (surface.first_index + index_offset) as usize;
-            let x = (surface.first_vertex + self.indices[index + 0] as i32) as usize;
-            let y = (surface.first_vertex + self.indices[index + 1] as i32) as usize;
-            let z = (surface.first_vertex + self.indices[index + 2] as i32) as usize;
-
-            shapes.push(Shape
-            {
-                primitive: obj_exporter::Primitive::Triangle((z, Some(z), Some(z)), (y, Some(y), Some(y)), (x, Some(x), Some(x))),
-                groups: vec![],
-                smoothing_groups: vec![]
-            });
-
-            index_offset += 3;
+            writeln!(writer)?;
         }
 
-        shapes
+        Ok(())
     }
 }
 
